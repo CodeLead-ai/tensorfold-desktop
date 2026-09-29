@@ -1,0 +1,1 @@
+{"model_type":"qwen3_5","quantization":{"group_size":64,"bits":4,"mode":"affine"},"text_config":{"model_type":"qwen3_5_text","hidden_size":5120,"num_hidden_layers":64,"vocab_size":248320,"max_position_embeddings":262144},"temperature":1.0,"top_k":20,"top_p":0.95}

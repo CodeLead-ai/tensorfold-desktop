@@ -1,0 +1,25 @@
+Gemma 4 (gemma4; MLX lane engine)
+  kernels  gemma/v1
+  model    mlx-community/gemma-4-26b-a4b-it-4bit
+Gemma 4 (gemma4_text; MLX lane engine)
+  kernels  gemma/v1
+  model    mlx-community/gemma-4-26b-a4b-it-4bit
+GLM-5.3-Flash (glm5_next; MLX lane engine, CUDA engine)
+  kernels  glm/flash/v1
+  model    Vontra/GLM-5.3-Flash-MLX-4bit-MTP
+  model    Mia-AiLab/GLM-5.3-Flash-EXL3-TR3-4bpw
+  drafter  incoai/GLM-5.3-Flash-DFlash2
+Nemotron 3.5 Lightning (nemotron_h; MLX lane engine, CUDA engine)
+  kernels  nemotron/lightning/v1
+  model    Vontra/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-MLX-4bit
+Qwen3.8 dense (qwen3_5; MLX lane engine, CUDA engine)
+  kernels  qwen/dense/v1
+  model    Vontra/Qwen3.8-27B-MLX-4bit
+  model    turboderp/Qwen3.8-27B-exl3
+  drafter  z-lab/Qwen3.8-27B-DFlash2
+Qwen3.6 MoE (qwen3_5_moe; CUDA engine)
+  model    Vontra/Qwen3.6-35B-A3B-MLX-4bit-MTP
+Qwen3.8 Flash Next (qwen4_exp; MLX lane engine, CUDA engine)
+  kernels  qwen/flash_next/v1
+  model    Vontra/Qwen3.8-Flash-Next-MLX-4bit-MTP
+  model    turboderp/Qwen3.8-Flash-Next-exl3

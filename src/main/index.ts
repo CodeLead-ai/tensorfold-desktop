@@ -1,5 +1,10 @@
 import { app, BrowserWindow } from 'electron'
 import { join } from 'node:path'
+import { resolveProfile } from './profile'
+
+const profile = resolveProfile(process.env, app.getAppPath())
+app.setName(profile.name)
+app.setPath('userData', join(app.getPath('appData'), profile.name))
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -7,7 +12,7 @@ function createWindow(): void {
     height: 820,
     minWidth: 1000,
     minHeight: 640,
-    title: 'TensorFold Desk',
+    title: profile.name,
     backgroundColor: '#060B18',
     show: false,
     webPreferences: {

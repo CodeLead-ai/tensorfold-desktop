@@ -1,0 +1,1 @@
+tensorfold: Qwen3.8 dense cannot run this checkpoint: the tied embedding head is not supported by this packed Qwen decoder. Use Vontra/Qwen3.8-27B-MLX-4bit
