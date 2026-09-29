@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { ServerState } from '@shared/api'
-import { familyFor, infoError, parseInfo, parseModels } from '@shared/checkpoints'
+import { familyFor, infoError, parseInfo, parseModels, runsHere } from '@shared/checkpoints'
 import { applyPreset, emptyConfig, type ServeConfig } from '@shared/config'
 import type { DoneEvent } from '@shared/events'
 import { parseLmsPs } from '@shared/lmstudio'
@@ -30,6 +30,14 @@ describe('tensorfold info and models', () => {
       runsOn: 'Apple Silicon (MLX), NVIDIA GPUs (CUDA)',
       sampling: { temperature: 1, top_k: 20, top_p: 0.95 }
     })
+  })
+
+  it('knows a checkpoint whose family runs only on CUDA is not servable on a Mac (info exits 0 for it)', () => {
+    const cudaOnly = parseInfo(fixture('tensorfold-info-cuda-only.txt'))
+    expect(cudaOnly).toMatchObject({ modelType: 'qwen3_5_moe', family: 'Qwen3.6 MoE', runsOn: 'NVIDIA GPUs (CUDA)' })
+    expect(runsHere(cudaOnly, 'darwin')).toBe(false)
+    expect(runsHere(cudaOnly, 'linux')).toBe(true)
+    expect(runsHere(parseInfo(fixture('tensorfold-info-qwen27b-8bit.txt')), 'darwin')).toBe(true)
   })
 
   it('takes the reason from a failed info', () => {

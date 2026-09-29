@@ -136,6 +136,15 @@ export function parseModels(stdout: string): Family[] {
   return families
 }
 
+/**
+ * Whether `info`'s "runs on" names this machine: `tensorfold info` exits 0 for a family with only a CUDA
+ * engine too ("runs on NVIDIA GPUs (CUDA)"), which a Mac cannot serve.
+ */
+export function runsHere(info: CheckpointInfo, platform: string): boolean {
+  if (!info.runsOn) return true
+  return platform === 'darwin' ? /Apple Silicon|MLX/.test(info.runsOn) : /NVIDIA|CUDA/.test(info.runsOn)
+}
+
 /** The family of a model type that has an engine for this platform (MLX on a Mac). */
 export function familyFor(families: readonly Family[], modelType: string | null, platform: string): Family | null {
   if (!modelType) return null

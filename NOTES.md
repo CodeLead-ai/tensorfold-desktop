@@ -78,5 +78,8 @@ the K3 run's serve log of 2026-09-29 (kept as `test/fixtures/k3-serve-2026-09-29
     non-zero. For example, Qwen3.5-0.8B gives `tensorfold: Qwen3.8 dense cannot run this checkpoint: the tied
     embedding head is not supported by this packed Qwen decoder. Use Vontra/Qwen3.8-27B-MLX-4bit`. Such
     checkpoints are listed as skipped. On this Mac only the Qwen3.8-27B folders are servable.
-16. `tensorfold info <repo id>` may download `config.json` from Hugging Face when it is not cached. The app
+16. `tensorfold info` exits 0 for a checkpoint of a family with only a CUDA engine. On this Mac,
+    `Qwen3.6-35B-A3B-MLX-4bit` prints `runs on      NVIDIA GPUs (CUDA)` and exits 0. The library therefore
+    checks the "runs on" line too, and lists such a checkpoint as skipped: "runs on NVIDIA GPUs (CUDA) only".
+17. `tensorfold info <repo id>` may download `config.json` from Hugging Face when it is not cached. The app
     only runs `info` on directories.

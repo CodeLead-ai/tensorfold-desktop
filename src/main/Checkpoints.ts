@@ -13,6 +13,7 @@ import {
   infoError,
   parseInfo,
   parseModels,
+  runsHere,
   type Checkpoint,
   type CheckpointScan,
   type CheckpointSource,
@@ -230,12 +231,20 @@ export class Checkpoints {
       const result = await this.info(binary, c.path, refresh)
       const info = parseInfo(result.stdout)
       const family = familyFor(families, info.modelType, this.opts.platform)
-      const servable = result.code === 0
+      const here = runsHere(info, this.opts.platform)
+      const servable = result.code === 0 && here && !isDrafter
+      const reason = servable
+        ? null
+        : isDrafter
+          ? 'a draft model: TensorFold serves it next to its model'
+          : result.code === 0
+            ? `runs on ${info.runsOn} only, not on this machine`
+            : (infoError(result.stderr) ?? `tensorfold info exited with ${result.code}`)
       return {
         ...base,
         servable,
         info: result.stdout.trim() ? info : null,
-        reason: servable ? null : isDrafter ? 'a draft model: TensorFold serves it next to its model' : (infoError(result.stderr) ?? `tensorfold info exited with ${result.code}`),
+        reason,
         testedFamily: family !== null,
         testedCheckpoint: family !== null && c.repo !== null && family.models.includes(c.repo),
         drafter: family && family.drafters[0] ? { repo: family.drafters[0], pulled: pulled(family.drafters[0]) } : null

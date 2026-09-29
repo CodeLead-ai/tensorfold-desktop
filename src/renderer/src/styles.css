@@ -1399,11 +1399,12 @@ table.data td.message .msg {
 
 .cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(330px, 100%), 1fr));
   gap: 12px;
 }
 
 .ckpt {
+  min-width: 0;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--card-2);
@@ -1423,6 +1424,16 @@ table.data td.message .msg {
   align-items: flex-start;
   gap: 10px;
   justify-content: space-between;
+  min-width: 0;
+}
+
+.ckpt-head > div:first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.ckpt-head .btn {
+  flex: none;
 }
 
 .ckpt-name {
