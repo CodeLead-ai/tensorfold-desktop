@@ -1,0 +1,44 @@
+{
+  "name": "tensorfold-desk",
+  "productName": "TensorFold Desk",
+  "version": "0.1.0",
+  "description": "Start, stop, configure and monitor a local tensorfold serve process",
+  "private": true,
+  "license": "UNLICENSED",
+  "author": "Pedro Ramirez",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "dev:mock": "TENSORFOLD_DESK_MOCK=1 electron-vite dev",
+    "start": "electron-vite preview",
+    "build": "npm run typecheck && electron-vite build && electron-builder --mac dmg --arm64",
+    "build:app": "electron-vite build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "lint": "eslint --cache ."
+  },
+  "dependencies": {
+    "electron-store": "^11.0.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "zustand": "^5.0.15"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^24.19.0",
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "@vitejs/plugin-react": "^5.2.0",
+    "electron": "^44.5.0",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^5.0.0",
+    "eslint": "^10.11.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.12.0",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.71.0",
+    "vite": "^7.3.6",
+    "vitest": "^5.0.2"
+  }
+}
