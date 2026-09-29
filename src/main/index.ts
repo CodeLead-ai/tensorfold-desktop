@@ -1,7 +1,9 @@
 import { app, BrowserWindow, dialog, nativeTheme, session } from 'electron'
 import { join } from 'node:path'
+import { CHANNELS } from '@shared/api'
 import { Desk } from './Desk'
 import { registerIpc } from './ipc'
+import { MenuBar } from './MenuBar'
 import { captureScreens } from './screens'
 import { NetworkAudit, isAllowedRendererUrl } from './netGuard'
 import { resolveProfile } from './profile'
@@ -16,6 +18,7 @@ app.setPath('userData', process.env['TENSORFOLD_DESK_USER_DATA'] || join(app.get
 const devServer = process.env['ELECTRON_RENDERER_URL'] ?? null
 const audit = new NetworkAudit()
 let desk: Desk | null = null
+let menuBar: MenuBar | null = null
 let mainWindow: BrowserWindow | null = null
 let quitting = false
 
@@ -40,6 +43,13 @@ function createWindow(): BrowserWindow {
     }
   })
   win.once('ready-to-show', () => win.show())
+  win.on('close', (event) => {
+    // With the menu-bar item, closing the window keeps the app (and its server) running.
+    if (!quitting && menuBar && process.platform === 'darwin') {
+      event.preventDefault()
+      win.hide()
+    }
+  })
   win.on('closed', () => {
     if (mainWindow === win) mainWindow = null
   })
@@ -82,13 +92,19 @@ void app.whenReady().then(async () => {
     env,
     home,
     logDir: join(app.getPath('userData'), 'logs'),
+    snapshotDir: join(app.getPath('userData'), 'snapshots'),
+    infoCacheFile: join(app.getPath('userData'), 'cache', 'checkpoint-info.json'),
     mockBinary: profile.mockDefaults?.binary ?? null,
     mock: profile.mock,
     appVersion: app.getVersion(),
     platform: process.platform
   })
   desk.on('settings', (next) => (nativeTheme.themeSource = next.theme))
-  registerIpc(desk)
+  registerIpc(desk, audit)
+  menuBar = new MenuBar(desk, (view) => {
+    showWindow()
+    if (view) mainWindow?.webContents.send(CHANNELS.navigate, view)
+  })
   showWindow()
   const screens = process.env['TENSORFOLD_DESK_SCREENS']
   if (screens && mainWindow) {
@@ -106,7 +122,9 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', (event) => {
   if (quitting || !desk?.manager.running) {
+    quitting = true
     desk?.dispose()
+    menuBar?.destroy()
     return
   }
   event.preventDefault()

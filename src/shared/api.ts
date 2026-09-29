@@ -3,9 +3,13 @@
  * exposes as `window.tfdesk` (SPEC §4 Preload). The renderer makes no network calls; everything goes
  * through here.
  */
+import type { CheckpointScan } from './checkpoints'
 import type { ServeConfig } from './config'
 import type { LogLine } from './events'
 import type { HealthSample } from './health'
+import type { CommandResult, LmStudioStatus } from './lmstudio'
+import type { ProbeRequest, ProbeResult } from './probe'
+import type { PullState } from './pull'
 import type { SessionInfo } from './session'
 import type { Settings } from './settings'
 import type { ValidationIssue } from './validate'
@@ -53,6 +57,23 @@ export interface ServerState {
 
 export type ActionResult = { ok: true } | { ok: false; error: string; issues?: ValidationIssue[] }
 
+/** A sequence of user commands (LM Studio's unload or restore) and what came of it. */
+export interface StepsResult {
+  ok: boolean
+  error: string | null
+  steps: CommandResult[]
+  issues?: ValidationIssue[]
+}
+
+export type SnapshotResult = { ok: true; path: string; json: string } | { ok: false; error: string }
+
+/** A request the renderer made, and whether the network guard let it through (SPEC §6.8). */
+export interface AuditEntry {
+  at: number
+  url: string
+  allowed: boolean
+}
+
 export interface BinaryInfo {
   path: string | null
   source: 'settings' | 'path' | 'found' | 'mock' | null
@@ -98,6 +119,19 @@ export interface DeskApi {
   previewCommand(config: ServeConfig): Promise<string>
   /** The main process asks for a view (the menu-bar item, the screenshot run). */
   onNavigate(cb: (view: string) => void): Unsubscribe
+  listCheckpoints(refresh: boolean): Promise<CheckpointScan>
+  pull(repo: string): Promise<ActionResult>
+  cancelPull(): Promise<void>
+  getPull(): Promise<PullState | null>
+  onPull(cb: (state: PullState) => void): Unsubscribe
+  lmStudioStatus(): Promise<LmStudioStatus>
+  unloadAndServe(config: ServeConfig): Promise<StepsResult>
+  stopAndRestore(): Promise<StepsResult>
+  probe(request: ProbeRequest): Promise<ProbeResult>
+  exportSnapshot(): Promise<SnapshotResult>
+  /** CODELEAD_BASE_URL and CODELEAD_MODEL lines, or null when nothing is serving. */
+  runnerLines(): Promise<string | null>
+  networkAudit(): Promise<AuditEntry[]>
 }
 
 export const CHANNELS = {
@@ -117,5 +151,17 @@ export const CHANNELS = {
   reveal: 'shell:reveal',
   chooseFile: 'dialog:choose',
   previewCommand: 'server:preview',
-  navigate: 'app:navigate'
+  navigate: 'app:navigate',
+  listCheckpoints: 'checkpoints:list',
+  pull: 'pull:start',
+  cancelPull: 'pull:cancel',
+  getPull: 'pull:get',
+  pullUpdate: 'pull:update',
+  lmStatus: 'lms:status',
+  unloadAndServe: 'lms:unload-and-serve',
+  stopAndRestore: 'lms:stop-and-restore',
+  probe: 'probe:run',
+  exportSnapshot: 'snapshot:export',
+  runnerLines: 'snapshot:runner',
+  networkAudit: 'audit:list'
 } as const

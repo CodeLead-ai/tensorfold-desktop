@@ -3,11 +3,7 @@
  * load its own files (and, in development, the Vite dev server on localhost), blocks every other request,
  * and keeps a record of what was asked, for the audit in Settings.
  */
-export interface AuditEntry {
-  at: number
-  url: string
-  allowed: boolean
-}
+import type { AuditEntry } from '@shared/api'
 
 export function isAllowedRendererUrl(url: string, devServer: string | null): boolean {
   if (url.startsWith('file:') || url.startsWith('devtools:') || url.startsWith('data:') || url.startsWith('blob:')) return true

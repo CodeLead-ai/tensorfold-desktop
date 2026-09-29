@@ -31,7 +31,7 @@ export function resolveProfile(env: NodeJS.ProcessEnv, appRoot: string): Profile
       model: join(dir, 'models', 'lmstudio-community', 'Qwen3.8-27B-MLX-8bit'),
       checkpointRoots: [join(dir, 'models'), join(dir, 'hf-cache', 'hub')],
       lms: join(dir, 'fake-lms.mjs'),
-      restoreCommand: `"${join(dir, 'fake-lms.mjs')}" load google/gemma-4-e4b`
+      restoreCommand: 'lms load google/gemma-4-e4b'
     }
   }
 }

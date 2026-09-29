@@ -21,7 +21,8 @@ beforeAll(async () => {
       TENSORFOLD_DESK_USER_DATA: userData,
       MOCK_TENSORFOLD_LOAD_MS: '600',
       MOCK_TENSORFOLD_TIME_SCALE: '0.003',
-      MOCK_TENSORFOLD_INTERVAL_MS: '100'
+      MOCK_TENSORFOLD_INTERVAL_MS: '100',
+      FAKE_LMS_STATE: join(userData, 'fake-lms.json')
     }
   })
   page = await app.firstWindow()
@@ -72,6 +73,40 @@ describe('the app against the mock', () => {
 
     await header().getByRole('button', { name: 'Stop' }).click()
     await header().locator('text=exit 0').waitFor({ timeout: 30_000 })
+    expect(await header().locator('.state').innerText()).toBe('Stopped')
+  })
+})
+
+describe('P1 against the mock', () => {
+  const rail = (name: RegExp): ReturnType<Page['locator']> => page.locator('nav.rail').getByRole('button', { name })
+
+  it('lists the servable checkpoints, and "Serve this" fills the form', async () => {
+    await rail(/Checkpoints/).click()
+    await expect.poll(() => page.locator('.ckpt').count(), { timeout: 20_000 }).toBe(2)
+    const card = page.locator('.ckpt:has(.ckpt-name:text-is("Qwen3.8-27B-MLX-4bit"))')
+    expect(await card.innerText()).toContain('MLX 4-bit, groups of 64')
+    await card.getByRole('button', { name: 'Serve this' }).click()
+    await expect.poll(() => page.getByRole('textbox', { name: /^Model/ }).inputValue()).toMatch(/Qwen3\.8-27B-MLX-4bit$/)
+  })
+
+  it('unloads LM Studio, serves, probes, then stops and restores (SPEC §6.5 against the fake lms)', async () => {
+    await rail(/Server/).click()
+    const lmsCard = page.locator('section.card:has(h2:text-is("LM Studio"))')
+    await lmsCard.locator('table td', { hasText: 'google/gemma-4-e4b' }).waitFor({ timeout: 15_000 })
+    await field('--port').fill(String(await freePort()))
+    page.once('dialog', (dialog) => void dialog.accept())
+    await lmsCard.getByRole('button', { name: 'Unload LM Studio, then serve' }).click()
+    await header().locator('.state.serving').waitFor({ timeout: 30_000 })
+    await lmsCard.locator('text=Nothing loaded in LM Studio.').waitFor({ timeout: 15_000 })
+
+    await rail(/Probe/).click()
+    await page.getByRole('button', { name: 'Run the probe' }).click()
+    await page.locator('text=measured here').waitFor({ timeout: 30_000 })
+    expect(await page.locator('table.compare').innerText()).toMatch(/req-[0-9a-f]{12}/)
+
+    await rail(/Server/).click()
+    await lmsCard.getByRole('button', { name: 'Stop, then restore' }).click()
+    await lmsCard.locator('table td', { hasText: 'google/gemma-4-e4b' }).waitFor({ timeout: 30_000 })
     expect(await header().locator('.state').innerText()).toBe('Stopped')
   })
 })

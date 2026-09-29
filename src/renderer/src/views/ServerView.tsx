@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import type { SnapshotResult } from '@shared/api'
 import {
   FLAGS,
   GROUP_TITLES,
@@ -17,7 +18,7 @@ import { CopyButton } from '../components/CopyButton'
 import { Field, FlagField, NumberInput, Segmented } from '../components/Fields'
 import { Icon } from '../components/Icon'
 import { MemoryGauge } from '../components/MemoryGauge'
-import { clock, duration, fixed, int } from '../lib/format'
+import { bytes, clock, duration, fixed, int } from '../lib/format'
 import { useNow } from '../lib/hooks'
 import { useDesk } from '../store'
 
@@ -31,6 +32,8 @@ export function ServerView(): React.JSX.Element {
         <CommandCard />
         <ExitCard />
         <MemoryCard />
+        <SnapshotCard />
+        <LmStudioCard />
         <StartupCard />
       </div>
     </div>
@@ -350,6 +353,162 @@ function ExitCard(): React.JSX.Element | null {
                 </div>
               ))}
         </pre>
+      </div>
+    </section>
+  )
+}
+
+/** SPEC §2.5 and §3.8: what LM Studio has loaded, and the two ways around it. */
+function LmStudioCard(): React.JSX.Element {
+  const lms = useDesk((s) => s.lms)
+  const busy = useDesk((s) => s.lmsBusy)
+  const steps = useDesk((s) => s.lastSteps)
+  const status = useDesk((s) => s.server.status)
+  const settings = useDesk((s) => s.settings)
+  const { refreshLms, unloadAndServe, stopAndRestore, setView } = useDesk.getState()
+  useEffect(() => {
+    void refreshLms()
+  }, [refreshLms])
+  const generating = lms?.models.filter((m) => m.status === 'generating') ?? []
+  const restore = settings?.restoreCommand.trim() ?? ''
+
+  return (
+    <section className="card">
+      <div className="card-head">
+        <h2>LM Studio</h2>
+        <span className="spacer" />
+        <button className="btn small ghost" onClick={() => void refreshLms()}>
+          <Icon name="restart" size={12} /> Check
+        </button>
+      </div>
+      <div className="card-body grid" style={{ gap: 12 }}>
+        <span className="field-help">Its loaded models count against TensorFold's memory budget: unload them before serving.</span>
+        {!lms ? (
+          <span className="muted">Asking lms ps…</span>
+        ) : !lms.available ? (
+          <div className="issue warning">
+            <Icon name="alert" size={14} />
+            <span>
+              {lms.error}{' '}
+              <button className="btn small" onClick={() => setView('settings')}>
+                Settings
+              </button>
+            </span>
+          </div>
+        ) : lms.models.length === 0 ? (
+          <span className="muted">Nothing loaded in LM Studio.</span>
+        ) : (
+          <table className="data plain">
+            <tbody>
+              {lms.models.map((m) => (
+                <tr key={m.identifier}>
+                  <td className="left">{m.identifier}</td>
+                  <td>{m.sizeBytes ? bytes(m.sizeBytes) : '–'}</td>
+                  <td className="left">
+                    <span className={`tag ${m.status === 'generating' ? 'bad' : ''}`}>{m.status ?? '?'}</span>
+                  </td>
+                  <td className="faint">ctx {int(m.contextLength)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        <div className="row wrap">
+          <button
+            className="btn"
+            disabled={busy || status !== 'stopped' || !lms?.available}
+            onClick={() => {
+              if (generating.length && !window.confirm(`LM Studio is generating right now (${generating.map((m) => m.identifier).join(', ')}). Unload it anyway?`)) return
+              void unloadAndServe()
+            }}
+            title={settings ? `runs: ${settings.unloadCommand}` : ''}
+          >
+            Unload LM Studio, then serve
+          </button>
+          <button className="btn" disabled={busy || restore === ''} onClick={() => void stopAndRestore()} title={restore ? `runs: ${restore}` : 'Set a restore command in Settings'}>
+            Stop, then restore
+          </button>
+          {busy && <span className="muted">Working…</span>}
+        </div>
+        <div className="field-help mono">
+          unload: {settings?.unloadCommand || '–'}
+          <br />
+          restore: {restore || 'not set (Settings)'}
+        </div>
+        {steps && steps.steps.length > 0 && (
+          <div className="grid" style={{ gap: 6 }}>
+            {steps.steps.map((step, i) => (
+              <div key={i}>
+                <div className="row" style={{ fontSize: 12 }}>
+                  <span className={`tag ${step.ok ? 'ok' : 'bad'}`}>{step.ok ? 'ok' : (step.error ?? 'failed')}</span>
+                  <span className="mono">{step.command}</span>
+                </div>
+                {step.output.trim() && <pre className="lines-box selectable" style={{ marginTop: 6, maxHeight: 120 }}>{step.output.trim().split('\n').slice(-15).join('\n')}</pre>}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
+  )
+}
+
+/** SPEC §3.10: the serving configuration as JSON, and the lines a runner needs. */
+function SnapshotCard(): React.JSX.Element | null {
+  const server = useDesk((s) => s.server)
+  const notify = useDesk((s) => s.notify)
+  const [result, setResult] = useState<SnapshotResult | null>(null)
+  const [runner, setRunner] = useState<string | null>(null)
+  if (!server.info.serving || !server.config) return null
+  return (
+    <section className="card">
+      <div className="card-head">
+        <h2>Serving snapshot</h2>
+      </div>
+      <div className="card-body grid" style={{ gap: 10 }}>
+        <span className="field-help">The running configuration as JSON: the command line, every flag, the version, the checkpoint and drafter, and when it started.</span>
+        <div className="row wrap">
+          <button
+            className="btn"
+            onClick={async () => {
+              const r = await window.tfdesk.exportSnapshot()
+              setResult(r)
+              if (!r.ok) notify({ kind: 'error', text: r.error })
+            }}
+          >
+            <Icon name="export" size={14} /> Export snapshot
+          </button>
+          <button
+            className="btn"
+            onClick={async () => {
+              const lines = await window.tfdesk.runnerLines()
+              if (lines) {
+                await window.tfdesk.copyText(lines)
+                setRunner(lines)
+              }
+            }}
+          >
+            <Icon name="copy" size={14} /> Copy for a runner
+          </button>
+        </div>
+        {result?.ok && (
+          <div className="row wrap" style={{ gap: 8 }}>
+            <span className="mono selectable" style={{ fontSize: 12 }}>
+              {result.path}
+            </span>
+            <button className="btn small" onClick={() => void window.tfdesk.reveal(result.path)}>
+              <Icon name="folder" size={12} /> Show
+            </button>
+            <button className="btn small" onClick={() => void window.tfdesk.copyText(result.json)}>
+              <Icon name="copy" size={12} /> Copy JSON
+            </button>
+          </div>
+        )}
+        {runner && (
+          <pre className="command selectable" title="copied">
+            {runner}
+          </pre>
+        )}
       </div>
     </section>
   )

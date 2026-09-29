@@ -1394,3 +1394,92 @@ table.data td.message .msg {
 ::-webkit-scrollbar-corner {
   background: transparent;
 }
+
+/* ------------------------------------------------------------------ checkpoints, probe */
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+  gap: 12px;
+}
+
+.ckpt {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--card-2);
+  padding: 12px 14px;
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+
+.ckpt.current {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.ckpt-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.ckpt-name {
+  font-family: var(--mono);
+  font-weight: 600;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ckpt-sub {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.kv.small {
+  font-size: 12px;
+  gap: 4px 12px;
+}
+
+.pull-box {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--input);
+}
+
+.progress {
+  height: 6px;
+  border-radius: 4px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.progress i {
+  display: block;
+  height: 100%;
+  background: var(--accent-grad);
+  transition: width 0.3s ease;
+}
+
+table.data.plain td {
+  border-bottom-color: var(--line);
+}
+
+table.data.plain tr:last-child td {
+  border-bottom: 0;
+}
+
+table.data.compare th {
+  position: static;
+  background: transparent;
+}
+
+table.data.compare td {
+  font-size: 12.5px;
+}

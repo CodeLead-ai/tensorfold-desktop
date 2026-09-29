@@ -3,10 +3,14 @@
  * keeps the session's lines and request rows, the latest /health sample, the settings, and the server form.
  */
 import { create } from 'zustand'
-import type { BinaryInfo, ServerState } from '@shared/api'
+import type { BinaryInfo, ServerState, StepsResult } from '@shared/api'
+import type { CheckpointScan } from '@shared/checkpoints'
 import { emptyConfig, type ServeConfig } from '@shared/config'
 import type { LogLine } from '@shared/events'
 import type { HealthSample } from '@shared/health'
+import type { LmStudioStatus } from '@shared/lmstudio'
+import type { ProbeRequest, ProbeResult } from '@shared/probe'
+import type { PullState } from '@shared/pull'
 import { rowFromLine, type RequestRow } from '@shared/requests'
 import { emptySessionInfo } from '@shared/session'
 import type { Settings } from '@shared/settings'
@@ -59,6 +63,14 @@ interface DeskStore {
   preview: string
   busy: boolean
   toast: Toast | null
+  scan: CheckpointScan | null
+  scanning: boolean
+  pull: PullState | null
+  lms: LmStudioStatus | null
+  lmsBusy: boolean
+  lastSteps: StepsResult | null
+  probes: ProbeResult[]
+  probing: string | null
 
   init(): Promise<void>
   setView(view: ViewId): void
@@ -70,6 +82,14 @@ interface DeskStore {
   saveSettings(patch: Partial<Settings>): Promise<void>
   detectBinary(): Promise<void>
   notify(toast: Toast | null): void
+  loadCheckpoints(refresh: boolean): Promise<void>
+  serveThis(path: string): void
+  startPull(repo: string): Promise<void>
+  refreshLms(): Promise<void>
+  unloadAndServe(): Promise<void>
+  stopAndRestore(): Promise<void>
+  runProbe(request: ProbeRequest): Promise<ProbeResult>
+  runAlternation(): Promise<void>
 }
 
 let formTimer: ReturnType<typeof setTimeout> | null = null
@@ -105,6 +125,14 @@ export const useDesk = create<DeskStore>((set, get) => ({
   preview: '',
   busy: false,
   toast: null,
+  scan: null,
+  scanning: false,
+  pull: null,
+  lms: null,
+  lmsBusy: false,
+  lastSteps: null,
+  probes: [],
+  probing: null,
 
   async init() {
     if (get().ready) return
@@ -119,6 +147,11 @@ export const useDesk = create<DeskStore>((set, get) => ({
     api().onLines((batch) => set((state) => appendLines(state, batch)))
     api().onHealth((health) => set({ health }))
     api().onNavigate((view) => set({ view: view as ViewId }))
+    api().onPull((pull) => {
+      const before = get().pull
+      set({ pull })
+      if (pull.status === 'done' && before?.status === 'running') void get().loadCheckpoints(true)
+    })
     const [session, settings] = await Promise.all([api().getSession(), api().getSettings()])
     const rows = session.lines.map(rowFromLine).filter((r): r is RequestRow => r !== null)
     set({
@@ -200,6 +233,76 @@ export const useDesk = create<DeskStore>((set, get) => ({
     set({ binary: await api().detectBinary() })
     const form = get().form
     set({ preview: await api().previewCommand(form) })
+  },
+
+  async loadCheckpoints(refresh) {
+    set({ scanning: true })
+    try {
+      set({ scan: await api().listCheckpoints(refresh) })
+    } finally {
+      set({ scanning: false })
+    }
+  },
+
+  serveThis(path) {
+    get().setForm({ ...get().form, model: path })
+    set({ view: 'server' })
+  },
+
+  async startPull(repo) {
+    const result = await api().pull(repo)
+    if (!result.ok) get().notify({ kind: 'error', text: result.error })
+  },
+
+  async refreshLms() {
+    set({ lms: await api().lmStudioStatus() })
+  },
+
+  async unloadAndServe() {
+    set({ lmsBusy: true, lastSteps: null })
+    try {
+      const result = await api().unloadAndServe(get().form)
+      set({ lastSteps: result })
+      if (result.issues) set({ issues: result.issues })
+      if (!result.ok) get().notify({ kind: 'error', text: result.error ?? 'failed' })
+    } finally {
+      set({ lmsBusy: false })
+      void get().refreshLms()
+    }
+  },
+
+  async stopAndRestore() {
+    set({ lmsBusy: true, lastSteps: null })
+    try {
+      const result = await api().stopAndRestore()
+      set({ lastSteps: result })
+      if (!result.ok) get().notify({ kind: 'error', text: result.error ?? 'failed' })
+    } finally {
+      set({ lmsBusy: false })
+      void get().refreshLms()
+    }
+  },
+
+  async runProbe(request) {
+    set({ probing: request.label ?? 'probe' })
+    try {
+      const result = await api().probe(request)
+      set({ probes: [result, ...get().probes].slice(0, 50) })
+      return result
+    } finally {
+      set({ probing: null })
+    }
+  },
+
+  async runAlternation() {
+    const probe = get().settings?.probe
+    if (!probe) return
+    const base = { maxTokens: probe.maxTokens, reasoningEffort: probe.reasoningEffort, stream: true }
+    const solo = await get().runProbe({ ...base, prompt: probe.prompt, label: 'alternation 1: the prompt, solo' })
+    if (!solo.ok) return
+    const big = await get().runProbe({ prompt: probe.bigPrompt, maxTokens: probe.bigMaxTokens, reasoningEffort: probe.reasoningEffort, stream: true, label: 'alternation 2: a big generation' })
+    if (!big.ok) return
+    await get().runProbe({ ...base, prompt: probe.prompt, label: 'alternation 3: the prompt, after it' })
   },
 
   notify(toast) {

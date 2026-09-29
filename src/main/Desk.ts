@@ -5,13 +5,23 @@
 import { EventEmitter } from 'node:events'
 import { existsSync, statSync } from 'node:fs'
 import { join } from 'node:path'
-import type { ActionResult, BinaryInfo, ServerState, SessionSnapshot } from '@shared/api'
+import type { ActionResult, BinaryInfo, ServerState, SessionSnapshot, SnapshotResult, StepsResult } from '@shared/api'
+import type { CheckpointScan } from '@shared/checkpoints'
 import { buildServeArgv, buildServeEnv, formatCommandLine, type ServeConfig } from '@shared/config'
 import type { LogLine } from '@shared/events'
 import type { HealthSample } from '@shared/health'
+import type { CommandResult, LmStudioStatus } from '@shared/lmstudio'
+import type { ProbeRequest, ProbeResult } from '@shared/probe'
+import type { PullState } from '@shared/pull'
 import type { Settings } from '@shared/settings'
+import { runnerLines } from '@shared/snapshot'
 import { hasErrors, looksLikePath, validateConfig, type ValidationIssue } from '@shared/validate'
 import { findBinary } from './binary'
+import { Checkpoints } from './Checkpoints'
+import { LmStudio } from './LmStudio'
+import { runProbe } from './Probe'
+import { Puller } from './Pull'
+import { writeSnapshot } from './SnapshotWriter'
 import { HealthPoller, healthBase } from './HealthPoller'
 import { describePortOwner, isPortFree } from './ports'
 import { ProcessManager } from './ProcessManager'
@@ -22,6 +32,10 @@ export interface DeskOptions {
   env: NodeJS.ProcessEnv
   home: string
   logDir: string | null
+  /** Where exported serving snapshots go. */
+  snapshotDir: string | null
+  /** Where `tensorfold info` answers are cached. */
+  infoCacheFile: string | null
   mockBinary: string | null
   mock: boolean
   appVersion: string
@@ -33,6 +47,7 @@ interface DeskEvents {
   lines: [LogLine[]]
   health: [HealthSample]
   settings: [Settings]
+  pull: [PullState]
 }
 
 export function expandHome(path: string, home: string): string {
@@ -47,6 +62,9 @@ export function normalizeConfig(config: ServeConfig, home: string): ServeConfig 
 export class Desk extends EventEmitter<DeskEvents> {
   readonly manager: ProcessManager
   readonly health: HealthPoller
+  readonly checkpoints: Checkpoints
+  readonly puller: Puller
+  readonly lm: LmStudio
   private binaryInfo: BinaryInfo | null = null
   private binaryKey = ''
 
@@ -61,6 +79,10 @@ export class Desk extends EventEmitter<DeskEvents> {
     })
     this.manager.on('lines', (lines) => this.emit('lines', lines))
     this.health.on('sample', (sample) => this.emit('health', sample))
+    this.checkpoints = new Checkpoints({ cacheFile: opts.infoCacheFile, env: opts.env, platform: opts.platform, home: opts.home })
+    this.puller = new Puller(opts.env)
+    this.puller.on('update', (state) => this.emit('pull', state))
+    this.lm = new LmStudio({ env: opts.env, home: opts.home })
   }
 
   get settings(): Settings {
@@ -162,8 +184,81 @@ export class Desk extends EventEmitter<DeskEvents> {
     return this.start(config)
   }
 
+  async listCheckpoints(refresh = false): Promise<CheckpointScan> {
+    return this.checkpoints.scan(await this.binary(refresh), this.settings.checkpointRoots, refresh)
+  }
+
+  async pull(repo: string): Promise<ActionResult> {
+    const binary = await this.binary()
+    if (!binary.path) return { ok: false, error: binary.error ?? 'no tensorfold binary' }
+    return this.puller.start(binary.path, repo)
+  }
+
+  lmStudioStatus(): Promise<LmStudioStatus> {
+    return this.lm.status(this.settings.lmsPath)
+  }
+
+  /** SPEC §2.5: unload what LM Studio has loaded (its memory counts against the budget), then serve. */
+  async unloadAndServe(config: ServeConfig): Promise<StepsResult> {
+    const steps: CommandResult[] = []
+    if (this.manager.running) return { ok: false, error: `the server is ${this.manager.state.status}`, steps }
+    const issues = await this.validate(config)
+    if (hasErrors(issues)) return { ok: false, error: 'the configuration has errors; LM Studio was left as it is', steps, issues }
+    const settings = this.settings
+    const before = await this.lm.status(settings.lmsPath)
+    if (!before.available) return { ok: false, error: before.error ?? 'LM Studio is not available', steps }
+    if (before.models.length > 0) {
+      const unload = await this.lm.run(settings.unloadCommand, settings.lmsPath, 5 * 60_000)
+      steps.push(unload)
+      if (!unload.ok) return { ok: false, error: `the unload command failed (${unload.error}); the server was not started`, steps }
+      const after = await this.lm.status(settings.lmsPath)
+      if (after.models.length > 0) {
+        return { ok: false, error: `LM Studio still has ${after.models.map((m) => m.identifier).join(', ')} loaded; the server was not started`, steps }
+      }
+    }
+    const started = await this.start(config)
+    return started.ok ? { ok: true, error: null, steps } : { ok: false, error: started.error, steps, ...(started.issues ? { issues: started.issues } : {}) }
+  }
+
+  /** SPEC §2.5: stop the server, then run the user's restore command (it reloads LM Studio). */
+  async stopAndRestore(): Promise<StepsResult> {
+    const steps: CommandResult[] = []
+    const settings = this.settings
+    if (!settings.restoreCommand.trim()) return { ok: false, error: 'no restore command is set (Settings, LM Studio)', steps }
+    if (this.manager.running) await this.manager.stop()
+    const restore = await this.lm.run(settings.restoreCommand, settings.lmsPath)
+    steps.push(restore)
+    return { ok: restore.ok, error: restore.ok ? null : `the restore command failed (${restore.error})`, steps }
+  }
+
+  async probe(request: ProbeRequest): Promise<ProbeResult> {
+    const state = this.manager.state
+    const serving = state.info.serving
+    if (state.status !== 'serving' || !serving) {
+      return {
+        label: request.label ?? 'probe', ok: false, error: 'the server is not serving', status: null, startedAt: Date.now(), totalS: 0,
+        ttftS: null, promptTokens: null, completionTokens: null, tokPerS: null, finish: null, server: null, replyPreview: ''
+      }
+    }
+    return runProbe({ base: healthBase(serving.host, serving.port), model: serving.model, manager: this.manager }, request)
+  }
+
+  /** SPEC §3.10: the running (or last) configuration as JSON. */
+  exportSnapshot(): SnapshotResult {
+    const state = this.manager.state
+    if (!state.config || !state.info.serving) return { ok: false, error: 'nothing to export yet: start the server first' }
+    if (!this.opts.snapshotDir) return { ok: false, error: 'no folder for snapshots' }
+    const latest = this.health.latest
+    return { ok: true, ...writeSnapshot(this.opts.snapshotDir, state, latest?.ok ? latest.health.memory : null, this.opts.appVersion) }
+  }
+
+  runnerLines(): string | null {
+    return runnerLines(this.manager.state)
+  }
+
   dispose(): void {
     this.health.stop()
+    this.puller.cancel()
     this.manager.dispose()
   }
 

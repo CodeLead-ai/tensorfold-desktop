@@ -2,10 +2,12 @@ import { BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron'
 import { CHANNELS } from '@shared/api'
 import type { ServeConfig } from '@shared/config'
 import type { Settings } from '@shared/settings'
+import type { ProbeRequest } from '@shared/probe'
 import type { Desk } from './Desk'
+import type { NetworkAudit } from './netGuard'
 
 /** The renderer's API (src/preload) routed to the Desk service; events go to every window. */
-export function registerIpc(desk: Desk): void {
+export function registerIpc(desk: Desk, audit: NetworkAudit): void {
   const broadcast = (channel: string, payload: unknown): void => {
     for (const win of BrowserWindow.getAllWindows()) {
       if (!win.isDestroyed()) win.webContents.send(channel, payload)
@@ -14,6 +16,18 @@ export function registerIpc(desk: Desk): void {
   desk.on('state', (state) => broadcast(CHANNELS.state, state))
   desk.on('lines', (lines) => broadcast(CHANNELS.lines, lines))
   desk.on('health', (sample) => broadcast(CHANNELS.health, sample))
+  desk.on('pull', (state) => broadcast(CHANNELS.pullUpdate, state))
+  ipcMain.handle(CHANNELS.listCheckpoints, (_e, refresh: boolean) => desk.listCheckpoints(refresh === true))
+  ipcMain.handle(CHANNELS.pull, (_e, repo: string) => desk.pull(String(repo)))
+  ipcMain.handle(CHANNELS.cancelPull, () => desk.puller.cancel())
+  ipcMain.handle(CHANNELS.getPull, () => desk.puller.state)
+  ipcMain.handle(CHANNELS.lmStatus, () => desk.lmStudioStatus())
+  ipcMain.handle(CHANNELS.unloadAndServe, (_e, config: ServeConfig) => desk.unloadAndServe(config))
+  ipcMain.handle(CHANNELS.stopAndRestore, () => desk.stopAndRestore())
+  ipcMain.handle(CHANNELS.probe, (_e, request: ProbeRequest) => desk.probe(request))
+  ipcMain.handle(CHANNELS.exportSnapshot, () => desk.exportSnapshot())
+  ipcMain.handle(CHANNELS.runnerLines, () => desk.runnerLines())
+  ipcMain.handle(CHANNELS.networkAudit, () => audit.list())
 
   ipcMain.handle(CHANNELS.getSession, () => desk.session())
   ipcMain.handle(CHANNELS.start, (_e, config: ServeConfig) => desk.start(config))

@@ -3,7 +3,9 @@ import { Icon } from './components/Icon'
 import { Rail } from './components/Rail'
 import { StatusHeader } from './components/StatusHeader'
 import { useDesk } from './store'
+import { CheckpointsView } from './views/CheckpointsView'
 import { LogView } from './views/LogView'
+import { ProbeView } from './views/ProbeView'
 import { RequestsView } from './views/RequestsView'
 import { ServerView } from './views/ServerView'
 import { SettingsView } from './views/SettingsView'
@@ -20,17 +22,6 @@ function useTheme(): void {
     media.addEventListener('change', apply)
     return () => media.removeEventListener('change', apply)
   }, [theme])
-}
-
-function Placeholder({ title, text }: { title: string; text: string }): React.JSX.Element {
-  return (
-    <section className="card">
-      <div className="card-head">
-        <h2>{title}</h2>
-      </div>
-      <div className="empty">{text}</div>
-    </section>
-  )
 }
 
 export function App(): React.JSX.Element {
@@ -54,8 +45,8 @@ export function App(): React.JSX.Element {
           {view === 'server' && <ServerView />}
           {view === 'requests' && <RequestsView />}
           {view === 'log' && <LogView />}
-          {view === 'checkpoints' && <Placeholder title="Checkpoints" text="The checkpoint library comes with the P1 features." />}
-          {view === 'probe' && <Placeholder title="Probe" text="The probe comes with the P1 features." />}
+          {view === 'checkpoints' && <CheckpointsView />}
+          {view === 'probe' && <ProbeView />}
           {view === 'settings' && <SettingsView />}
         </main>
       </div>

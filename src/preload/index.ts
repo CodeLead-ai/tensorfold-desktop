@@ -24,7 +24,19 @@ const api: DeskApi = {
   copyText: (text) => ipcRenderer.invoke(CHANNELS.copyText, text),
   reveal: (path) => ipcRenderer.invoke(CHANNELS.reveal, path),
   chooseFile: (options) => ipcRenderer.invoke(CHANNELS.chooseFile, options),
-  onNavigate: (cb) => subscribe(CHANNELS.navigate, cb)
+  onNavigate: (cb) => subscribe(CHANNELS.navigate, cb),
+  listCheckpoints: (refresh) => ipcRenderer.invoke(CHANNELS.listCheckpoints, refresh),
+  pull: (repo) => ipcRenderer.invoke(CHANNELS.pull, repo),
+  cancelPull: () => ipcRenderer.invoke(CHANNELS.cancelPull),
+  getPull: () => ipcRenderer.invoke(CHANNELS.getPull),
+  onPull: (cb) => subscribe(CHANNELS.pullUpdate, cb),
+  lmStudioStatus: () => ipcRenderer.invoke(CHANNELS.lmStatus),
+  unloadAndServe: (config) => ipcRenderer.invoke(CHANNELS.unloadAndServe, config),
+  stopAndRestore: () => ipcRenderer.invoke(CHANNELS.stopAndRestore),
+  probe: (request) => ipcRenderer.invoke(CHANNELS.probe, request),
+  exportSnapshot: () => ipcRenderer.invoke(CHANNELS.exportSnapshot),
+  runnerLines: () => ipcRenderer.invoke(CHANNELS.runnerLines),
+  networkAudit: () => ipcRenderer.invoke(CHANNELS.networkAudit)
 }
 
 contextBridge.exposeInMainWorld('tfdesk', api)
