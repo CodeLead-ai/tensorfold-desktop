@@ -83,3 +83,27 @@ the K3 run's serve log of 2026-09-29 (kept as `test/fixtures/k3-serve-2026-09-29
     checks the "runs on" line too, and lists such a checkpoint as skipped: "runs on NVIDIA GPUs (CUDA) only".
 17. `tensorfold info <repo id>` may download `config.json` from Hugging Face when it is not cached. The app
     only runs `info` on directories.
+
+## When TensorFold is upgraded (0.4.0 is out; 0.3.6.2 is installed)
+
+The app targets the installed 0.3.6.2. Between it and 0.4.0 there are 0.3.6.3, 0.3.7 and 0.4.0. Their release notes,
+and the 0.4.0 source, say what changes for the app:
+
+- **Unchanged:** the `done` line (same format string, same round profile) and `/health` (same fields). The
+  request feed and the memory gauge keep working.
+- **New serve flags:** `--decode-share` (0.3.6.3, default 0.25), `--vision` and `--vision-urls`. The form knows
+  0.3.6.2's flags only. The flag-table test compares the table with `serve --help`, so update the two together.
+- **Memory:** 0.4.0 no longer reserves the whole reply at admission ("a stream holds memory for its next 2,048
+  tokens, not its whole reply"). The `start failed … the reply is reserved in full` refusal becomes rarer. When
+  memory runs short, the newest stream ends with an error naming `--parallel`. The refusal row keeps whatever
+  message comes, and its number extraction may need the new wording.
+- **Startup:** the concurrency line counts the probe round once ("0 streams of 8,192 tokens fit" became 13). A
+  prompt kernel that does not build prints a warning. Both parse, or fall back to `unknown`.
+- **A live status line in a terminal:** 0.4.0 redraws one line under the log in a TTY. The app reads a pipe, and
+  sets `TENSORFOLD_NO_LIVE=1` anyway.
+
+After upgrading:
+1. `npm run test:real`: SPEC §6.1, §6.3, §6.4, §6.6 and §6.8 on the new version.
+2. Keep a real serve log as `test/fixtures/serve-log-<version>.txt`, and add a test that none of its lines is
+   `unknown`. That is how the K3 log is tested.
+3. Add the new flags to `FLAGS` in `src/shared/config.ts` and to the test's copy of `serve --help`.
