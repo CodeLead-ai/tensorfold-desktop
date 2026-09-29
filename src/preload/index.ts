@@ -23,7 +23,8 @@ const api: DeskApi = {
   detectBinary: () => ipcRenderer.invoke(CHANNELS.detectBinary),
   copyText: (text) => ipcRenderer.invoke(CHANNELS.copyText, text),
   reveal: (path) => ipcRenderer.invoke(CHANNELS.reveal, path),
-  chooseFile: (options) => ipcRenderer.invoke(CHANNELS.chooseFile, options)
+  chooseFile: (options) => ipcRenderer.invoke(CHANNELS.chooseFile, options),
+  onNavigate: (cb) => subscribe(CHANNELS.navigate, cb)
 }
 
 contextBridge.exposeInMainWorld('tfdesk', api)

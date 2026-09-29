@@ -69,6 +69,8 @@ export interface SessionSnapshot {
   mock: boolean
   appVersion: string
   platform: string
+  /** Where session logs are written. */
+  logDir: string | null
 }
 
 export type Unsubscribe = () => void
@@ -94,6 +96,8 @@ export interface DeskApi {
   chooseFile(options: { title: string; directory: boolean; defaultPath?: string }): Promise<string | null>
   /** The command line for a configuration with the current binary, as the preview shows it. */
   previewCommand(config: ServeConfig): Promise<string>
+  /** The main process asks for a view (the menu-bar item, the screenshot run). */
+  onNavigate(cb: (view: string) => void): Unsubscribe
 }
 
 export const CHANNELS = {
@@ -112,5 +116,6 @@ export const CHANNELS = {
   copyText: 'clipboard:write',
   reveal: 'shell:reveal',
   chooseFile: 'dialog:choose',
-  previewCommand: 'server:preview'
+  previewCommand: 'server:preview',
+  navigate: 'app:navigate'
 } as const

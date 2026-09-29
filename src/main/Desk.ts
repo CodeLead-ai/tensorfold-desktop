@@ -82,8 +82,15 @@ export class Desk extends EventEmitter<DeskEvents> {
       health: this.health.latest,
       mock: this.opts.mock,
       appVersion: this.opts.appVersion,
-      platform: this.opts.platform
+      platform: this.opts.platform,
+      logDir: this.opts.logDir
     }
+  }
+
+  /** For the screenshot run: an environment variable for the next server started (e.g. a mock failure). */
+  setChildEnv(key: string, value: string | undefined): void {
+    if (value === undefined) delete this.opts.env[key]
+    else this.opts.env[key] = value
   }
 
   /** The binary, found once per configured path (Settings can change it). */

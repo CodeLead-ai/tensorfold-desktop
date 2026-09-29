@@ -2,6 +2,7 @@ import { app, BrowserWindow, dialog, nativeTheme, session } from 'electron'
 import { join } from 'node:path'
 import { Desk } from './Desk'
 import { registerIpc } from './ipc'
+import { captureScreens } from './screens'
 import { NetworkAudit, isAllowedRendererUrl } from './netGuard'
 import { resolveProfile } from './profile'
 import { SettingsService, profileDefaults } from './Settings'
@@ -9,7 +10,8 @@ import { loginShellEnv } from './shellEnv'
 
 const profile = resolveProfile(process.env, app.getAppPath())
 app.setName(profile.name)
-app.setPath('userData', join(app.getPath('appData'), profile.name))
+// TENSORFOLD_DESK_USER_DATA: a throwaway profile for end-to-end tests and screenshots.
+app.setPath('userData', process.env['TENSORFOLD_DESK_USER_DATA'] || join(app.getPath('appData'), profile.name))
 
 const devServer = process.env['ELECTRON_RENDERER_URL'] ?? null
 const audit = new NetworkAudit()
@@ -88,6 +90,13 @@ void app.whenReady().then(async () => {
   desk.on('settings', (next) => (nativeTheme.themeSource = next.theme))
   registerIpc(desk)
   showWindow()
+  const screens = process.env['TENSORFOLD_DESK_SCREENS']
+  if (screens && mainWindow) {
+    captureScreens(mainWindow, desk, screens).catch((e: unknown) => {
+      console.error(e)
+      app.exit(1)
+    })
+  }
 })
 
 app.on('activate', () => showWindow())
