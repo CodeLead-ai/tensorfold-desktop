@@ -1,0 +1,27 @@
+appId: dev.tensorfold.desk
+productName: TensorFold Desk
+copyright: Pedro Ramirez
+directories:
+  output: release
+  buildResources: build
+files:
+  - out/**
+  - package.json
+  - '!**/*.map'
+npmRebuild: false
+mac:
+  target:
+    - target: dmg
+      arch: [arm64]
+  category: public.app-category.developer-tools
+  icon: build/icon.png
+  # Ad-hoc signature: an arm64 app must be signed to launch; there is no Developer ID here.
+  identity: '-'
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  extendInfo:
+    LSUIElement: false
+    NSHumanReadableCopyright: TensorFold Desk
+dmg:
+  artifactName: TensorFold-Desk-${version}-arm64.${ext}
+  title: TensorFold Desk ${version}

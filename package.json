@@ -18,7 +18,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "lint": "eslint --cache .",
     "screens": "electron-vite build && node scripts/screens.mjs",
-    "test:e2e": "electron-vite build && vitest run -c vitest.e2e.config.ts"
+    "test:e2e": "electron-vite build && vitest run -c vitest.e2e.config.ts",
+    "test:real": "electron-vite build && vitest run -c vitest.real.config.ts"
   },
   "dependencies": {
     "electron-store": "^11.0.2",
