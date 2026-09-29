@@ -43,6 +43,11 @@ describe('the app against the mock', () => {
     expect(await page.locator('.segmented button.on').first().innerText()).toBe('CodeLead endorsed')
   })
 
+  it("keeps a flag's value when its name is clicked (a label must not hand the click to the reset button)", async () => {
+    await page.locator('label.field code:text-is("--context")').click()
+    expect(await field('--context').inputValue()).toBe('89600')
+  })
+
   it('blocks a folder without config.json', async () => {
     const model = page.getByRole('textbox', { name: /^Model/ })
     const good = await model.inputValue()

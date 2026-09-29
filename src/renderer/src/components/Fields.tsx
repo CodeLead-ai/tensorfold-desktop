@@ -14,7 +14,16 @@ interface FieldProps {
 
 export function Field({ label, help, issue, set, onClear, wide, children }: FieldProps): React.JSX.Element {
   return (
-    <label className={`field ${wide ? 'wide' : ''}`}>
+    <label
+      className={`field ${wide ? 'wide' : ''}`}
+      onClick={(e) => {
+        // A label hands a click on its text to its first labelable descendant, and that is the reset button
+        // (or a segment) when there is one: clicking a flag's name would clear it. Focus the field instead.
+        if ((e.target as HTMLElement).closest('input, select, textarea, button, a')) return
+        e.preventDefault()
+        e.currentTarget.querySelector<HTMLElement>('input:not([type=checkbox]), select, textarea')?.focus()
+      }}
+    >
       <span className="field-label">
         {label}
         {set && onClear && (

@@ -6,15 +6,17 @@
  *   §6.4 the memory gauge moves during a long prefill,
  *   §6.6 the exported snapshot reproduces the command line,
  *   §6.8 the window makes no request beyond its own files.
- * The second run adds --snapshot-dir (a temporary folder), so the probe's conversation is not saved into
- * TensorFold's shared ~/.cache/tensorfold/prefix-snapshots.
+ * Needs the machine's memory: LM Studio must have nothing loaded (the test checks, and stops if it has).
+ * The second run passes --snapshot-dir <tmp>/prefix-snapshots. TensorFold keeps conversation snapshots in the
+ * sibling session-snapshots folder, so the probe's conversation stays in the temporary folder and never reaches
+ * ~/.cache/tensorfold. The run checks the flag reached the server before it sends the probe.
  */
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { _electron as electron, type ElectronApplication, type Page } from 'playwright-core'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import type { DeskApi } from '@shared/api'
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import type { DeskApi, ServerState } from '@shared/api'
 import type { LogLine } from '@shared/events'
 import { reproduceCommandLine, type ServingSnapshot } from '@shared/snapshot'
 import { ROOT } from '../helpers'
@@ -27,74 +29,114 @@ const available = existsSync(join(MODEL, 'config.json'))
 
 let app: ElectronApplication
 let page: Page
-let userData: string
-let snapshotDir: string
+let work: string
+let failed = false
 const log = (...args: unknown[]): void => console.log('[acceptance]', ...args)
 
 beforeAll(async () => {
   if (!available) return
-  userData = mkdtempSync(join(tmpdir(), 'tfdesk-real-'))
-  snapshotDir = mkdtempSync(join(tmpdir(), 'tfdesk-real-snapshots-'))
+  work = mkdtempSync(join(tmpdir(), 'tfdesk-real-'))
+  mkdirSync(join(work, 'profile'))
   const env = { ...process.env } as Record<string, string>
   delete env['ELECTRON_RUN_AS_NODE']
   delete env['TENSORFOLD_DESK_MOCK']
-  app = await electron.launch({ args: [ROOT], env: { ...env, TENSORFOLD_DESK_USER_DATA: userData } })
+  app = await electron.launch({ args: [ROOT], env: { ...env, TENSORFOLD_DESK_USER_DATA: join(work, 'profile') } })
   page = await app.firstWindow()
   await page.locator('text=Configuration').waitFor()
 })
 
+afterEach((context) => {
+  if (context.task.result?.state === 'fail') failed = true
+})
+
 afterAll(async () => {
   if (!available) return
+  const state = await page?.evaluate(() => window.tfdesk.getSession().then((s) => s.state.status)).catch(() => 'unknown')
+  if (state !== 'stopped') await page?.evaluate(() => window.tfdesk.stopServer()).catch(() => undefined)
   await app?.close()
-  rmSync(userData, { recursive: true, force: true })
-  rmSync(snapshotDir, { recursive: true, force: true })
+  if (failed) log(`kept for a look: ${work} (the app's logs are in profile/logs)`)
+  else rmSync(work, { recursive: true, force: true })
 })
 
 const header = (): ReturnType<Page['locator']> => page.locator('header.header')
+const button = (scope: ReturnType<Page['locator']> | Page, name: string): ReturnType<Page['locator']> => scope.getByRole('button', { name, exact: true })
 const rail = (name: RegExp): ReturnType<Page['locator']> => page.locator('nav.rail').getByRole('button', { name })
-const session = (): Promise<{ lines: LogLine[]; state: { lastExit: { code: number | null } | null; logFile: string | null } }> =>
-  page.evaluate(() => window.tfdesk.getSession()) as never
+const session = (): Promise<{ lines: LogLine[]; state: ServerState }> => page.evaluate(() => window.tfdesk.getSession()) as never
 
-async function activeGib(): Promise<number | null> {
-  const text = await page.locator('.legend-item:has(.label:text-is("active")) .value').innerText().catch(() => '')
-  const m = /([\d.]+) GiB/.exec(text)
-  return m ? Number(m[1]) : null
+/** Refuses to load the 27B beside a model LM Studio holds (SPEC §2.4: unload it first). */
+async function lmStudioIsEmpty(): Promise<void> {
+  const lms = await page.evaluate(() => window.tfdesk.lmStudioStatus())
+  const loaded = lms.available ? lms.models.map((m) => `${m.identifier} (${m.status})`) : []
+  log('LM Studio:', lms.available ? loaded.join(', ') || 'nothing loaded' : lms.error)
+  expect(loaded, 'LM Studio has a model loaded: unload it before this run').toEqual([])
+}
+
+/** Start, and wait for serving; a death while loading fails at once with the server's last lines. */
+async function startAndServe(): Promise<ServerState> {
+  const before = (await session()).state.sessionId
+  const t0 = Date.now()
+  await button(header(), 'Start').click()
+  for (;;) {
+    const { state } = await session()
+    if (state.sessionId !== before && state.status === 'serving') {
+      log(`serving after ${((Date.now() - t0) / 1000).toFixed(1)} s (session ${state.sessionId})`)
+      return state
+    }
+    if (state.sessionId !== before && state.status === 'stopped') {
+      throw new Error(`the server died while loading:\n${state.lastExit?.lastLines.map((l) => l.text).join('\n')}`)
+    }
+    if (Date.now() - t0 > 5 * 60_000) throw new Error(`not serving after 5 minutes (${state.status})`)
+    await page.waitForTimeout(500)
+  }
 }
 
 describe.skipIf(!available)('SPEC §6 against the real server', () => {
   it('§6.1: the endorsed preset serves, then stops with its exit code', async () => {
-    const command = await page.locator('pre.command').innerText()
-    log('command:', command.replace(/\s+/g, ' '))
-    expect(command.replace(/\s+/g, ' ')).toMatch(new RegExp(`/tensorfold serve ${MODEL.replace(/[.]/g, '\\.')} --port 8080 --context 89600 --reasoning-effort medium --no-update-check$`))
-    const t0 = Date.now()
-    await header().getByRole('button', { name: 'Start' }).click()
-    await header().locator('.state.loading').waitFor({ timeout: 30_000 })
-    await header().locator('.state.serving').waitFor({ timeout: 5 * 60_000 })
+    await lmStudioIsEmpty()
+    await expect.poll(() => page.locator('pre.command').innerText(), { timeout: 20_000 }).toContain(' serve ')
+    const command = (await page.locator('pre.command').innerText()).replace(/\s+/g, ' ')
+    log('command:', command)
+    expect(command).toMatch(new RegExp(`/tensorfold serve ${MODEL.replace(/[.]/g, '\\.')} --port 8080 --context 89600 --reasoning-effort medium --no-update-check$`))
+
+    const state = await startAndServe()
+    expect(state.commandLine).toBe(command)
     const chips = (await header().innerText()).replace(/\s+/g, ' ')
-    log(`serving after ${((Date.now() - t0) / 1000).toFixed(1)} s:`, chips)
+    log('header:', chips)
     expect(chips).toContain('Qwen3.8-27B-MLX-8bit')
     expect(chips).toContain('port 8080')
     expect(chips).toContain('context 89,600')
     expect(chips).toMatch(/loaded in [\d.]+ s/)
     expect(chips).toContain('tensorfold 0.3.6.2')
 
-    await header().getByRole('button', { name: 'Stop' }).click()
+    await button(header(), 'Stop').click()
     await header().locator('text=exit 0').waitFor({ timeout: 90_000 })
     expect(await header().locator('.state').innerText()).toBe('Stopped')
     const s = await session()
-    expect(s.state.lastExit?.code).toBe(0)
-    log('stopped: exit', s.state.lastExit?.code, 'log file', s.state.logFile)
+    expect(s.state.lastExit).toMatchObject({ code: 0, requested: true })
+    log('stopped: exit', s.state.lastExit?.code, '· log file', s.state.logFile)
     expect(readFileSync(s.state.logFile as string, 'utf8')).toContain('[tensorfold] serving Qwen3.8-27B-MLX-8bit at http://127.0.0.1:8080/v1')
   })
 
   it('§6.3, §6.4, §6.6, §6.8: a long prefill moves the gauge; the feed, the snapshot and the audit hold', async () => {
-    const dirField = page.locator('label.field:has(code:text-is("--snapshot-dir")) input')
-    await dirField.fill(snapshotDir)
-    await header().getByRole('button', { name: 'Start' }).click()
-    await header().locator('.state.serving').waitFor({ timeout: 5 * 60_000 })
+    await lmStudioIsEmpty()
+    const snapshotDir = join(work, 'prefix-snapshots')
+    await page.locator('label.field:has(code:text-is("--snapshot-dir")) input').fill(snapshotDir)
+    await expect.poll(() => page.locator('pre.command').innerText()).toContain(`--snapshot-dir ${snapshotDir}`)
+    const state = await startAndServe()
+    if (!state.commandLine.includes(`--snapshot-dir ${snapshotDir}`)) {
+      await page.evaluate(() => window.tfdesk.stopServer())
+      throw new Error(`the server runs without the test's --snapshot-dir; stopped it before any request:\n${state.commandLine}`)
+    }
+    log('command:', state.commandLine)
+
     await rail(/Server/).click()
     await page.locator('text=of what MLX may use').waitFor({ timeout: 30_000 })
     await page.waitForTimeout(2500)
+    const activeGib = async (): Promise<number | null> => {
+      const text = await page.locator('.legend-item:has(.label:text-is("active")) .value').innerText().catch(() => '')
+      const m = /([\d.]+) GiB/.exec(text)
+      return m ? Number(m[1]) : null
+    }
     const before = await activeGib()
     log('active before the probe:', before, 'GiB')
 
@@ -104,22 +146,21 @@ describe.skipIf(!available)('SPEC §6 against the real server', () => {
     await page.locator('textarea').first().fill(prompt)
     await page.locator('label.field:has(code:text-is("max_tokens")) input').fill('16')
     const clicked = Date.now()
-    await page.getByRole('button', { name: 'Run the probe' }).click()
+    await button(page, 'Run the probe').click()
 
     await rail(/Server/).click()
     const samples: number[] = []
-    const started = Date.now()
-    while (Date.now() - started < 10 * 60_000) {
+    while (Date.now() - clicked < 10 * 60_000) {
       const v = await activeGib()
       if (v !== null) samples.push(v)
-      const done = await page.evaluate(() => window.tfdesk.getSession().then((s) => s.lines.some((l) => l.event.kind === 'done')))
-      if (done) break
+      const s = await session()
+      if (s.lines.some((l) => l.event.kind === 'done')) break
+      if (s.state.sessionId !== state.sessionId || s.state.status !== 'serving') throw new Error(`the server left serving during the probe (${s.state.status})`)
       await page.waitForTimeout(1000)
     }
-    const peak = Math.max(...samples)
     log('active during the prefill (GiB, every 1 s):', samples.join(' '))
     expect(before).not.toBeNull()
-    expect(peak - (before as number)).toBeGreaterThan(0.3)
+    expect(Math.max(...samples) - (before as number)).toBeGreaterThan(0.3)
 
     await rail(/Probe/).click()
     await page.locator('text=measured here').waitFor({ timeout: 60_000 })
@@ -141,11 +182,12 @@ describe.skipIf(!available)('SPEC §6 against the real server', () => {
 
     // §6.6: the snapshot reproduces the command line.
     await rail(/Server/).click()
-    await page.getByRole('button', { name: 'Export snapshot' }).click()
-    const path = await page.locator('span.mono:has-text("serving-")').innerText()
-    const snapshot = JSON.parse(readFileSync(path.trim(), 'utf8')) as ServingSnapshot
+    await button(page, 'Export snapshot').click()
+    const path = (await page.locator('span.mono:has-text("serving-")').innerText()).trim()
+    const snapshot = JSON.parse(readFileSync(path, 'utf8')) as ServingSnapshot
+    expect(snapshot.commandLine).toBe(state.commandLine)
     expect(reproduceCommandLine(snapshot)).toBe(snapshot.commandLine)
-    log('snapshot:', path.trim(), '\n   ', snapshot.commandLine)
+    log('snapshot:', path)
 
     // §6.8: the window asked for nothing beyond its own files.
     const audit = await page.evaluate(() => window.tfdesk.networkAudit())
@@ -153,7 +195,9 @@ describe.skipIf(!available)('SPEC §6 against the real server', () => {
     log(`network audit: ${audit.length} requests, ${outside.length} beyond the app's files`)
     expect(outside).toEqual([])
 
-    await header().getByRole('button', { name: 'Stop' }).click()
-    await header().locator('text=exit 0').waitFor({ timeout: 90_000 })
+    await button(header(), 'Stop').click()
+    await header().locator('text=exit 0').waitFor({ timeout: 120_000 })
+    const kept = existsSync(join(work, 'session-snapshots')) ? 'in the test folder' : 'nowhere (none saved)'
+    log(`the probe's conversation snapshot: ${kept}`)
   })
 })
