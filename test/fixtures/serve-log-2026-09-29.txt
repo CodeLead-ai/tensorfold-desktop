@@ -1,0 +1,15 @@
+[tensorfold] memory budget 44.8 GiB: MLX's buffers up to 41.8 GiB, 3 GiB for the rest of the process; TENSORFOLD_MEMORY_LIMIT_GB can raise it to 51.8
+[tensorfold] loading Qwen3.8-27B-MLX-8bit: Qwen3.8 dense (qwen3_5)
+[tensorfold] lane kernels on: 9 matmul shapes warmed, fused projections {'zba': 48, 'kv': 16, 'gu': 64}
+[tensorfold] drafter /Users/peter/.cache/huggingface/hub/models--z-lab--Qwen3.8-27B-DFlash2/snapshots/50307d4c4cde6860d4eee73e2547cd786fe8e8a4 block=8 bits=4
+[tensorfold] 31.1 GiB of weights kept resident
+[tensorfold] prompt chunks of up to 2,048 tokens, cut at replies 256+ tokens apart
+[tensorfold] concurrency: up to 8 requests share each round; memory budget 36.2 GB (MLX's share 41.8 GB, or 70% of 64 GB less 8.6 GB in use elsewhere); a stream 163 MB at 64 tokens, 394 MB at 2,112, then 114.0 KB a token
+[tensorfold] loaded system-block snapshot tokens=640 in 0.0s
+[tensorfold] serving Qwen3.8-27B-MLX-8bit at http://127.0.0.1:8080/v1 (sampling: temperature 1.0, top_k 20, top_p 0.95; drafts: on; context: 89600; loaded in 31.0s)
+[tensorfold] 127.0.0.1 "GET /v1/models HTTP/1.1" 200 -
+[tensorfold] 127.0.0.1 "POST /v1/chat/completions HTTP/1.1" 200 -
+[tensorfold] read conversation snapshot tokens=9370 from disk in 0.06s
+[tensorfold] done req-a22838d887b0 prompt=42 cached=0 thinking=True effort=low tokens=5 sha=235a6b4690b8 finish=length tok/s=59.1 ttft=0.72s prefill=0.72s rounds=1 accepted=4/4 ms/round=67.3 forward=67.3 draft=0.0 post=0.0 rows=16.9 checkpoints=2 (0.92 GiB, hits=1 misses=0 evictions=0)
+[tensorfold] done req-07bcd37c1ff7 prompt=23124 cached=0 thinking=True effort=medium tokens=4598 sha=5c969274b94d finish=stop tok/s=60.5 ttft=41.74s prefill=41.71s rounds=773 accepted=3824/12792 ms/round=98.2 forward=98.2 draft=0.0 post=0.0 rows=17.5 checkpoints=0 (0.00 GiB, hits=13 misses=17 evictions=29)
+[tensorfold] start failed req-449c47a5f5a1 cached=0: RequestError: This request needs about 41.8 GiB of the 41.8 GiB MLX may use (this server's 44.8 GiB memory budget less 3.0 GiB for the rest of the process); it fits up to 25,225 tokens in the prompt with 64,000 reply tokens. Shorten the prompt or max_tokens (the reply is reserved in full), or start the server with a smaller --context so clients compact sooner; --drafter none, a smaller or more quantized checkpoint, or a Mac with more RAM leave more room.

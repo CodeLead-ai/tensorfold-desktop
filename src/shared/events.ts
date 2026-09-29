@@ -167,7 +167,10 @@ export interface ServingEvent {
   host: string
   port: number
   backend: 'mlx' | 'cuda'
+  /** `temperature 1.0, top_k 20, top_p 0.95` as numbers; empty when greedy. */
   sampling: Record<string, number>
+  /** `sampling: greedy` (temperature 0). */
+  greedy: boolean
   drafts: boolean
   /** null: "unlimited". */
   context: number | null
