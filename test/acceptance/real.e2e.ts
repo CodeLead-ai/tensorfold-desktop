@@ -11,7 +11,7 @@
  * sibling session-snapshots folder, so the probe's conversation stays in the temporary folder and never reaches
  * ~/.cache/tensorfold. The run checks the flag reached the server before it sends the probe.
  */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { _electron as electron, type ElectronApplication, type Page } from 'playwright-core'
@@ -31,7 +31,12 @@ let app: ElectronApplication
 let page: Page
 let work: string
 let failed = false
-const log = (...args: unknown[]): void => console.log('[acceptance]', ...args)
+/** Printed, and kept in .tmp/acceptance.log (vitest hides a passing test's output outside a terminal). */
+const log = (...args: unknown[]): void => {
+  console.log('[acceptance]', ...args)
+  mkdirSync(join(ROOT, '.tmp'), { recursive: true })
+  appendFileSync(join(ROOT, '.tmp', 'acceptance.log'), `${new Date().toISOString()} ${args.map(String).join(' ')}\n`)
+}
 
 beforeAll(async () => {
   if (!available) return

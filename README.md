@@ -124,5 +124,16 @@ it they would arrive late.
 
 ## Acceptance (SPEC §6)
 
-See [CHANGELOG.md](CHANGELOG.md) for what each step added. The acceptance run on this Mac is recorded in
-[NOTES.md](NOTES.md#acceptance-run).
+| | | |
+| --- | --- | --- |
+| 1 | The endorsed preset serves and stops with its exit code (real server) | passes (`npm run test:real`) |
+| 2 | Every Appendix A line parses with its exact values | passes (`npm test`), plus all 145 lines of a real serve log |
+| 3 | Requests appear within a second; sparkline, totals, highlighted refusals | passes: real server and mock |
+| 4 | The memory gauge moves during a long prefill | passes: 31.3 → 37.4 GiB during a 36,743-token prefill |
+| 5 | "Unload LM Studio, then serve"; a clear message without `lms` | passes against a fake `lms`; not run against the real one |
+| 6 | The exported snapshot reproduces the command line | passes: real server and tests |
+| 7 | typecheck, test, build; dev:mock; the dmg opens on arm64 | passes |
+| 8 | Nothing leaves the machine | the window asks for its own files only; a real pull was not run |
+
+The run, with its figures, is recorded in [NOTES.md](NOTES.md#acceptance-run). [CHANGELOG.md](CHANGELOG.md) lists
+what each step added.

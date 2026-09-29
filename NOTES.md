@@ -81,7 +81,11 @@ the K3 run's serve log of 2026-09-29 (kept as `test/fixtures/k3-serve-2026-09-29
 16. `tensorfold info` exits 0 for a checkpoint of a family with only a CUDA engine. On this Mac,
     `Qwen3.6-35B-A3B-MLX-4bit` prints `runs on      NVIDIA GPUs (CUDA)` and exits 0. The library therefore
     checks the "runs on" line too, and lists such a checkpoint as skipped: "runs on NVIDIA GPUs (CUDA) only".
-17. `tensorfold info <repo id>` may download `config.json` from Hugging Face when it is not cached. The app
+17. **Where conversations are saved.** When it stops, TensorFold saves up to two conversations per model (the
+    longest first) into the folder next to `--snapshot-dir`, `<parent>/session-snapshots`, keeping the two newest.
+    By default that is `~/.cache/tensorfold/session-snapshots`. Anything started with the default snapshot folder
+    therefore writes there, and can push out a conversation an earlier run left.
+18. `tensorfold info <repo id>` may download `config.json` from Hugging Face when it is not cached. The app
     only runs `info` on directories.
 
 ## When TensorFold is upgraded (0.4.0 is out; 0.3.6.2 is installed)
@@ -107,3 +111,43 @@ After upgrading:
 2. Keep a real serve log as `test/fixtures/serve-log-<version>.txt`, and add a test that none of its lines is
    `unknown`. That is how the K3 log is tested.
 3. Add the new flags to `FLAGS` in `src/shared/config.ts` and to the test's copy of `serve --help`.
+
+## Acceptance run
+
+`npm run test:real` on this Mac (M5 Max, 64 GB) against TensorFold 0.3.6.2 and Qwen3.8-27B-MLX-8bit, with LM Studio
+empty. It drives the app through its UI.
+
+**2026-09-29 15:22: both tests pass.**
+- §6.1: the endorsed preset (`… serve …/Qwen3.8-27B-MLX-8bit --port 8080 --context 89600 --reasoning-effort medium
+  --no-update-check`) reached "serving". The header showed the model, port 8080, context 89,600, "loaded in" and
+  tensorfold 0.3.6.2. Stop returned to "stopped" with exit code 0. The app's log file holds the serving line.
+- §6.3, §6.4, §6.6, §6.8 as below. The run left `~/.cache/tensorfold` untouched.
+
+**Figures from the 15:11 run** (the same checks, in an earlier version of the test):
+- §6.4: active memory was 31.27 GiB before the probe and rose to 37.37 GiB during its 36,743-token prefill
+  (read from the gauge once a second).
+- Probe beside the server's `done` line (`req-e0c6e10457b8`):
+
+  | | measured here | server's `done` line |
+  | --- | --- | --- |
+  | time to first token | 59.35 s | 59.35 s |
+  | tok/s | 44.5 | 44.9 |
+  | prompt and reply tokens | 36,743 and 16 | 36,743 and 16 |
+  | prefill | – | 59.28 s (620 tok/s) |
+  | accepted drafts | – | 11 of 30 |
+- §6.3: the POST's access line arrived 16 ms after the click, and the `done` line 59.7 s after that. This
+  confirms `PYTHONUNBUFFERED` on the real binary (item 8). The `done` line was in the feed at once.
+- §6.6: the exported snapshot reproduced the command line.
+- §6.8: the window made 3 requests, all to its own files.
+
+**What the 15:11 run left behind.** In it, the server was started twice. The session that served the probe was
+spawned 43 s after the test's click, without the test's `--snapshot-dir`. So TensorFold saved the probe's
+conversation to `~/.cache/tensorfold/session-snapshots/75dda8dd1589a00d3dc8cee3acfe9853.safetensors` (2.57 GB,
+15:13:57) and pruned an older conversation (item 17). The test now refuses to run while LM Studio holds a
+model. It fails at once when the server dies while loading, and checks that the running command has its
+`--snapshot-dir` before any request.
+
+**Not run:**
+- §6.5 with the real `lms`, which would unload LM Studio's model. The flow is tested end to end against
+  `mock/fake-lms.mjs`.
+- A real `pull`, so huggingface.co from the CLI child (§6.8) was not observed.
