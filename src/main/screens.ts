@@ -25,6 +25,8 @@ async function until(check: () => boolean | Promise<boolean>, timeoutMs: number)
 export async function captureScreens(win: BrowserWindow, desk: Desk, dirArg: string): Promise<void> {
   const dir = resolve(dirArg)
   mkdirSync(dir, { recursive: true })
+  const theme = process.env['TENSORFOLD_DESK_SCREENS_THEME']
+  if (theme === 'light' || theme === 'dark') desk.setSettings({ theme })
   win.setContentSize(1440, 900)
   win.center()
   if (win.webContents.isLoading()) await new Promise<void>((r) => win.webContents.once('did-finish-load', () => r()))

@@ -41,7 +41,7 @@ export function App(): React.JSX.Element {
       <Rail />
       <div className="main">
         <StatusHeader />
-        <main className={`view ${view === 'log' ? 'fill' : ''}`}>
+        <main key={view} className={`view ${view === 'log' ? 'fill' : ''}`}>
           {view === 'server' && <ServerView />}
           {view === 'requests' && <RequestsView />}
           {view === 'log' && <LogView />}

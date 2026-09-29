@@ -103,6 +103,7 @@ describe.skipIf(!available)('SPEC §6 against the real server', () => {
     await rail(/Probe/).click()
     await page.locator('textarea').first().fill(prompt)
     await page.locator('label.field:has(code:text-is("max_tokens")) input').fill('16')
+    const clicked = Date.now()
     await page.getByRole('button', { name: 'Run the probe' }).click()
 
     await rail(/Server/).click()
@@ -129,6 +130,10 @@ describe.skipIf(!available)('SPEC §6 against the real server', () => {
     // §6.3: the done line reaches the feed within a second of arriving.
     const s = await session()
     const doneLine = s.lines.find((l) => l.event.kind === 'done') as LogLine
+    // NOTES 8: with PYTHONUNBUFFERED the stream's access line arrives when its headers go out, not with the done line.
+    const access = s.lines.find((l) => l.event.kind === 'access' && l.event.method === 'POST' && l.at >= clicked) as LogLine
+    log(`POST access line ${access.at - clicked} ms after the click; done line ${((doneLine.at - access.at) / 1000).toFixed(1)} s after it`)
+    expect(access.at - clicked).toBeLessThan(5000)
     await rail(/Requests/).click()
     const reqId = doneLine.event.kind === 'done' ? doneLine.event.reqId : ''
     await page.locator(`td:text-is("${reqId}")`).waitFor({ timeout: 1000 })
