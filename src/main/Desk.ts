@@ -37,6 +37,8 @@ export interface DeskOptions {
   snapshotDir: string | null
   /** Where `tensorfold info` answers are cached. */
   infoCacheFile: string | null
+  /** Whether LM Studio runs; the process list when not given. */
+  lmStudioRunning?: () => Promise<boolean>
   mockBinary: string | null
   mock: boolean
   appVersion: string
@@ -83,7 +85,7 @@ export class Desk extends EventEmitter<DeskEvents> {
     this.checkpoints = new Checkpoints({ cacheFile: opts.infoCacheFile, env: opts.env, platform: opts.platform, home: opts.home })
     this.puller = new Puller(opts.env)
     this.puller.on('update', (state) => this.emit('pull', state))
-    this.lm = new LmStudio({ env: opts.env, home: opts.home })
+    this.lm = new LmStudio({ env: opts.env, home: opts.home, ...(opts.lmStudioRunning ? { isRunning: opts.lmStudioRunning } : {}) })
   }
 
   get settings(): Settings {
@@ -209,7 +211,7 @@ export class Desk extends EventEmitter<DeskEvents> {
     if (hasErrors(issues)) return { ok: false, error: 'the configuration has errors; LM Studio was left as it is', steps, issues }
     const settings = this.settings
     const before = await this.lm.status(settings.lmsPath)
-    if (!before.available) return { ok: false, error: before.error ?? 'LM Studio is not available', steps }
+    if (before.running && !before.available) return { ok: false, error: before.error ?? 'LM Studio is not available', steps }
     if (before.models.length > 0) {
       const unload = await this.lm.run(settings.unloadCommand, settings.lmsPath, 5 * 60_000)
       steps.push(unload)

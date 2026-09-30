@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
@@ -7,6 +7,7 @@ import type { HealthSample } from '@shared/health'
 import { defaultSettings } from '@shared/settings'
 import { reproduceCommandLine } from '@shared/snapshot'
 import { Desk, normalizeConfig } from '../../src/main/Desk'
+import { LMSTUDIO_PROCESS } from '../../src/main/LmStudio'
 import { MemorySettings } from '../../src/main/Settings'
 import { FAST_MOCK_ENV, MOCK, MOCK_MODEL, ROOT, freePort, runMock, type Run } from '../helpers'
 
@@ -22,7 +23,7 @@ afterEach(async () => {
   }
 })
 
-function desk(settingsPatch: Partial<ReturnType<typeof defaultSettings>> = {}, env: Record<string, string> = {}): Desk {
+function desk(settingsPatch: Partial<ReturnType<typeof defaultSettings>> = {}, env: Record<string, string> = {}, lmStudioRunning = true): Desk {
   const settings = new MemorySettings({ ...defaultSettings('/Users/test'), healthIntervalMs: 500, ...settingsPatch })
   const d = new Desk({
     settings,
@@ -31,6 +32,7 @@ function desk(settingsPatch: Partial<ReturnType<typeof defaultSettings>> = {}, e
     logDir,
     snapshotDir: join(logDir, 'snapshots'),
     infoCacheFile: join(logDir, 'cache', 'info.json'),
+    lmStudioRunning: async () => lmStudioRunning,
     mockBinary: MOCK,
     mock: true,
     appVersion: '0.0.0-test',
@@ -189,5 +191,30 @@ describe('P1 against the mock', () => {
     })
     expect(d.runnerLines()).toBe(`CODELEAD_BASE_URL=http://127.0.0.1:${config.endpoint.port}/v1\nCODELEAD_MODEL=Qwen3.8-27B-MLX-8bit`)
     await d.stop()
+  })
+})
+
+describe('LM Studio not running', () => {
+  it('reports it without asking lms (which could start LM Studio), and serves without unloading', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tfdesk-nolms-'))
+    const marker = join(dir, 'lms-was-run')
+    const lms = join(dir, 'lms')
+    writeFileSync(lms, `#!/bin/sh\ntouch '${marker}'\necho '[]'\n`)
+    chmodSync(lms, 0o755)
+    const d = desk({ lmsPath: lms }, { MOCK_TENSORFOLD_INTERVAL_MS: '0' }, false)
+    expect(await d.lmStudioStatus()).toMatchObject({ running: false, available: false, models: [], error: null })
+    const config = applyPreset(emptyConfig(MOCK_MODEL), 'endorsed')
+    config.endpoint.port = await freePort()
+    expect(await d.unloadAndServe(config)).toEqual({ ok: true, error: null, steps: [] })
+    expect(existsSync(marker)).toBe(false)
+    await d.stop()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('recognizes LM Studio in the process list, and not its helpers', () => {
+    expect(LMSTUDIO_PROCESS.test('/Applications/LM Studio.app/Contents/MacOS/LM Studio')).toBe(true)
+    expect(LMSTUDIO_PROCESS.test('/Users/p/.lmstudio/llmster/0.1/llmster --port 1234')).toBe(true)
+    expect(LMSTUDIO_PROCESS.test('/Applications/LM Studio.app/Contents/Frameworks/LM Studio Helper (GPU).app/Contents/MacOS/LM Studio Helper (GPU) --type=gpu-process')).toBe(false)
+    expect(LMSTUDIO_PROCESS.test('/usr/bin/vim notes-about-LM-Studio.txt')).toBe(false)
   })
 })

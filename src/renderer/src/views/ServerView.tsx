@@ -359,7 +359,7 @@ function ExitCard(): React.JSX.Element | null {
 }
 
 /** SPEC §2.5 and §3.8: what LM Studio has loaded, and the two ways around it. */
-function LmStudioCard(): React.JSX.Element {
+function LmStudioCard(): React.JSX.Element | null {
   const lms = useDesk((s) => s.lms)
   const busy = useDesk((s) => s.lmsBusy)
   const steps = useDesk((s) => s.lastSteps)
@@ -368,9 +368,14 @@ function LmStudioCard(): React.JSX.Element {
   const { refreshLms, unloadAndServe, stopAndRestore, setView } = useDesk.getState()
   useEffect(() => {
     void refreshLms()
+    // LM Studio may have started or quit meanwhile; look again when the window comes back (no polling).
+    const onFocus = (): void => void refreshLms()
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
   }, [refreshLms])
   const generating = lms?.models.filter((m) => m.status === 'generating') ?? []
   const restore = settings?.restoreCommand.trim() ?? ''
+  if (!lms?.running) return null
 
   return (
     <section className="card">
@@ -383,9 +388,7 @@ function LmStudioCard(): React.JSX.Element {
       </div>
       <div className="card-body grid" style={{ gap: 12 }}>
         <span className="field-help">Its loaded models count against TensorFold's memory budget: unload them before serving.</span>
-        {!lms ? (
-          <span className="muted">Asking lms ps…</span>
-        ) : !lms.available ? (
+        {!lms.available ? (
           <div className="issue warning">
             <Icon name="alert" size={14} />
             <span>
@@ -416,7 +419,7 @@ function LmStudioCard(): React.JSX.Element {
         <div className="row wrap">
           <button
             className="btn"
-            disabled={busy || status !== 'stopped' || !lms?.available}
+            disabled={busy || status !== 'stopped' || !lms.available}
             onClick={() => {
               if (generating.length && !window.confirm(`LM Studio is generating right now (${generating.map((m) => m.identifier).join(', ')}). Unload it anyway?`)) return
               void unloadAndServe()

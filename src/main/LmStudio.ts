@@ -21,8 +21,23 @@ function isExecutable(path: string): boolean {
   }
 }
 
+/** LM Studio's app, or its headless daemon. */
+export const LMSTUDIO_PROCESS = /\/LM Studio\.app\/Contents\/MacOS\/LM Studio(\s|$)|(^|\/)llmster(\s|$)/
+
+/**
+ * Whether LM Studio runs, from the process list. lms is not asked: it can start LM Studio's daemon itself, which
+ * is not the app's to do.
+ */
+export function lmStudioProcessRunning(): Promise<boolean> {
+  return new Promise((resolve) => {
+    execFile('/bin/ps', ['-axo', 'command='], { maxBuffer: 32 * 1024 * 1024 }, (error, stdout) => {
+      resolve(!error && stdout.split('\n').some((line) => LMSTUDIO_PROCESS.test(line)))
+    })
+  })
+}
+
 export class LmStudio {
-  constructor(private readonly opts: { env: NodeJS.ProcessEnv; home: string }) {}
+  constructor(private readonly opts: { env: NodeJS.ProcessEnv; home: string; isRunning?: () => Promise<boolean> }) {}
 
   /** The configured lms, else `lms` on PATH, else LM Studio's own ~/.lmstudio/bin/lms. */
   resolve(configured: string): { path: string | null; searched: string[] } {
@@ -39,9 +54,13 @@ export class LmStudio {
 
   async status(configured: string): Promise<LmStudioStatus> {
     const checkedAt = Date.now()
+    if (!(await (this.opts.isRunning ?? lmStudioProcessRunning)())) {
+      return { running: false, available: false, lms: null, models: [], error: null, checkedAt }
+    }
     const { path, searched } = this.resolve(configured)
     if (!path) {
       return {
+        running: true,
         available: false,
         lms: null,
         models: [],
@@ -50,11 +69,11 @@ export class LmStudio {
       }
     }
     const result = await this.exec(path, ['ps', '--json'], 20_000)
-    if (result.code !== 0) return { available: false, lms: path, models: [], error: `lms ps failed: ${result.output.trim() || `exit ${result.code}`}`, checkedAt }
+    if (result.code !== 0) return { running: true, available: false, lms: path, models: [], error: `lms ps failed: ${result.output.trim() || `exit ${result.code}`}`, checkedAt }
     try {
-      return { available: true, lms: path, models: parseLmsPs(result.output), error: null, checkedAt }
+      return { running: true, available: true, lms: path, models: parseLmsPs(result.output), error: null, checkedAt }
     } catch (e) {
-      return { available: false, lms: path, models: [], error: `lms ps --json: ${e instanceof Error ? e.message : String(e)}`, checkedAt }
+      return { running: true, available: false, lms: path, models: [], error: `lms ps --json: ${e instanceof Error ? e.message : String(e)}`, checkedAt }
     }
   }
 

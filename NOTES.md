@@ -152,3 +152,15 @@ model. It fails at once when the server dies while loading, and checks that the 
 - §6.5 with the real `lms`, which would unload LM Studio's model. The flow is tested end to end against
   `mock/fake-lms.mjs`.
 - A real `pull`, so huggingface.co from the CLI child (§6.8) was not observed.
+
+## Decisions (2026-09-29)
+
+- **Servers the app did not start are out of scope.** A server started by a bench runner, for example, shows up
+  only as the port being in use. The port check names the model it serves.
+- **The LM Studio card shows only while LM Studio is running.** The app finds LM Studio in the process list
+  (the app, or its headless `llmster`) and does not ask `lms`, which could start LM Studio's daemon. When LM Studio
+  is not running, nothing is shown, and "Unload LM Studio, then serve" simply serves. When it runs and `lms` is
+  missing, the card says so.
+- **The restore command on this Mac is the bench's reload script,** set in the app's settings (not in its code) to
+  `cd /Users/peter/Projects/codelead-bench && ./reload-model.sh`. Testing §6.5 against the real LM Studio waits
+  until Peter says it can be touched.

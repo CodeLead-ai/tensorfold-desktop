@@ -95,6 +95,7 @@ void app.whenReady().then(async () => {
     snapshotDir: join(app.getPath('userData'), 'snapshots'),
     infoCacheFile: join(app.getPath('userData'), 'cache', 'checkpoint-info.json'),
     mockBinary: profile.mockDefaults?.binary ?? null,
+    ...(profile.mock ? { lmStudioRunning: async () => process.env['FAKE_LMS_RUNNING'] !== '0' } : {}),
     mock: profile.mock,
     appVersion: app.getVersion(),
     platform: process.platform

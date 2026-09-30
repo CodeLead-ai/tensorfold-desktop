@@ -59,3 +59,5 @@ TensorFold 0.3.6.2.
 - `.gitignore` covers TensorFold snapshots, session logs, exported snapshots and dmgs.
 - A cap on the app's session logs: the newest 50 by default, set in Settings, with the logs' count and size shown.
 - Servers the app did not start stay out of scope: such a server shows up only as the port being in use.
+- The LM Studio card shows only while LM Studio is running, which is read from the process list without asking
+  `lms`. When LM Studio is not running, "Unload LM Studio, then serve" simply serves.

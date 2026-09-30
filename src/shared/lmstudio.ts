@@ -11,6 +11,8 @@ export interface LmsModel {
 }
 
 export interface LmStudioStatus {
+  /** LM Studio (the app, or its headless llmster) is running. When it is not, lms is not asked at all. */
+  running: boolean
   /** lms was found and answered. */
   available: boolean
   lms: string | null
