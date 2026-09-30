@@ -16,6 +16,9 @@ function isHealthPoll(line: LogLine): boolean {
 export function LogView(): React.JSX.Element {
   const lines = useDesk((s) => s.lines)
   const logFile = useDesk((s) => s.server.logFile)
+  const status = useDesk((s) => s.server.status)
+  const armed = useDesk((s) => s.server.status === 'serving' || (s.server.status === 'loading' && s.server.info.memoryBudget !== null))
+  const { dumpStacks } = useDesk.getState()
   const [query, setQuery] = useState('')
   const [streams, setStreams] = useState<Record<LogStream, boolean>>({ stdout: true, stderr: true, desk: true })
   const [showPolls, setShowPolls] = useState(false)
@@ -67,6 +70,11 @@ export function LogView(): React.JSX.Element {
         <span className="faint mono" style={{ fontSize: 12 }}>
           {int(shown.length)} of {int(lines.length)} lines
         </span>
+        {(status === 'serving' || status === 'loading') && (
+          <button className="btn small" disabled={!armed} onClick={() => void dumpStacks()} title="SIGUSR1: TensorFold prints every thread's Python stack on stderr, here">
+            Dump stacks
+          </button>
+        )}
         <CopyButton text={() => shown.map((l) => l.text).join('\n')} label="Copy shown" />
         <CopyButton text={() => lines.map((l) => l.text).join('\n')} label="Copy all" />
         {logFile && (

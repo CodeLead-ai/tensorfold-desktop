@@ -13,6 +13,7 @@ import type {
   MemoryBudgetStartup,
   NoDrafterStartup,
   PromptChunksStartup,
+  ResumableStartup,
   ServingEvent,
   WeightsStartup
 } from './events'
@@ -28,6 +29,8 @@ export interface SessionInfo {
   promptChunks: PromptChunksStartup | null
   concurrency: ConcurrencyStartup | null
   contextWindow: ContextWindowStartup | null
+  /** 0.4.0+: the longest request (prompt and reply) whose prompt is kept for its next turn. */
+  resumable: ResumableStartup | null
   serving: ServingEvent | null
   notes: string[]
   /** The newer release an update notice named. */
@@ -36,6 +39,10 @@ export interface SessionInfo {
   lastTokPerS: number | null
   done: number
   refused: number
+  /** 0.4.0+: the streams waiting for memory, as the latest `memory: … wait for room` line says. */
+  memoryWait: { waiting: number; streams: number } | null
+  /** 0.4.0+: requests ended because memory ran short (`memory: ended …`). */
+  memoryEnded: number
 }
 
 export function emptySessionInfo(): SessionInfo {
@@ -50,12 +57,15 @@ export function emptySessionInfo(): SessionInfo {
     promptChunks: null,
     concurrency: null,
     contextWindow: null,
+    resumable: null,
     serving: null,
     notes: [],
     updateAvailable: null,
     lastTokPerS: null,
     done: 0,
-    refused: 0
+    refused: 0,
+    memoryWait: null,
+    memoryEnded: 0
   }
 }
 
@@ -84,6 +94,8 @@ export function applyEvent(info: SessionInfo, event: LogEvent): SessionInfo {
           return { ...info, concurrency: event }
         case 'context-window':
           return { ...info, contextWindow: event }
+        case 'resumable':
+          return { ...info, resumable: event }
         case 'note':
           return { ...info, notes: [...info.notes, event.text] }
         default:
@@ -96,7 +108,16 @@ export function applyEvent(info: SessionInfo, event: LogEvent): SessionInfo {
     case 'refused':
       return { ...info, refused: info.refused + 1 }
     case 'notice':
-      return event.what === 'update-available' ? { ...info, updateAvailable: String(event.fields['latest'] ?? '') } : info
+      switch (event.what) {
+        case 'update-available':
+          return { ...info, updateAvailable: String(event.fields['latest'] ?? '') }
+        case 'memory-wait':
+          return { ...info, memoryWait: { waiting: Number(event.fields['waiting']), streams: Number(event.fields['streams']) } }
+        case 'memory-ended':
+          return { ...info, memoryEnded: info.memoryEnded + 1 }
+        default:
+          return info
+      }
     default:
       return info
   }

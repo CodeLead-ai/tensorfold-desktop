@@ -48,7 +48,7 @@ the K3 run's serve log of 2026-09-29 (kept as `test/fixtures/k3-serve-2026-09-29
    Python tracebacks, and the `faulthandler` stack dump that follows `stalled`. The app reads both streams, and
    the "last 50 lines" after a death include stderr.
 
-## Flags (`tensorfold serve --help`, installed 0.3.6.2)
+## Flags (`tensorfold serve --help`, 0.3.6.2)
 
 10. `--ssd-experts GIB` takes a size in GiB; it is not a switch. `--alias` is repeatable. `--port` defaults to
     8080 (the help shows no default; the source does). `--context 0` on Metal removes the metadata cap. The form
@@ -88,34 +88,74 @@ the K3 run's serve log of 2026-09-29 (kept as `test/fixtures/k3-serve-2026-09-29
 18. `tensorfold info <repo id>` may download `config.json` from Hugging Face when it is not cached. The app
     only runs `info` on directories.
 
-## When TensorFold is upgraded (0.4.0 is out; 0.3.6.2 is installed)
+## TensorFold 0.5.0 (installed 2026-09-30)
 
-The app targets the installed 0.3.6.2. Between it and 0.4.0 there are 0.3.6.3, 0.3.7 and 0.4.0. Their release notes,
-and the 0.4.0 source, say what changes for the app:
+**The upgrade.** On 2026-09-30, at Peter's go-ahead, `tensorfold update` moved the bench's venv
+(`~/Projects/codelead-bench/tensorfold-venv`) from 0.3.6.2 to 0.5.0, the latest release. It ran
+`pip install --upgrade git+https://github.com/ashhart/TensorFold.git@v0.5.0` (commit `9cd52ab4`). Only TensorFold
+changed: 0.5.0 accepts the venv's MLX 0.32.3, mlx-lm 0.31.3 and the rest, so pip left them alone. The server was
+stopped and nothing else ran. To go back:
+```bash
+/Users/peter/Projects/codelead-bench/tensorfold-venv/bin/python -m pip install 'git+https://github.com/ashhart/TensorFold.git@v0.3.6.2'
+```
 
-- **Unchanged:** the `done` line (same format string, same round profile) and `/health` (same fields). The
-  request feed and the memory gauge keep working.
-- **New serve flags:** `--decode-share` (0.3.6.3, default 0.25), `--vision` and `--vision-urls`. The form knows
-  0.3.6.2's flags only. The flag-table test compares the table with `serve --help`, so update the two together.
-- **Memory:** 0.4.0 no longer reserves the whole reply at admission ("a stream holds memory for its next 2,048
-  tokens, not its whole reply"). The `start failed … the reply is reserved in full` refusal becomes rarer. When
-  memory runs short, the newest stream ends with an error naming `--parallel`. The refusal row keeps whatever
-  message comes, and its number extraction may need the new wording.
-- **Startup:** the concurrency line counts the probe round once ("0 streams of 8,192 tokens fit" became 13). A
-  prompt kernel that does not build prints a warning. Both parse, or fall back to `unknown`.
-- **A live status line in a terminal:** 0.4.0 redraws one line under the log in a TTY. The app reads a pipe, and
-  sets `TENSORFOLD_NO_LIVE=1` anyway.
+**The bench's command still works:** the four flags its scripts pass (`--port 8080 --context 89600
+--reasoning-effort medium --no-update-check`) are unchanged. What can still make 0.5.0's runs differ from 0.3.6.2's:
+- `--reasoning-effort` no longer defaults to medium but to the chat template's own (xhigh for Qwen3.8). The bench
+  passes medium, so its server default is unchanged. A request's own `reasoning_effort` still wins.
+- 0.4.0's release notes say replies "can differ from 0.3.x's by a token here and there", for the 5- and 6-bit
+  layers. The bench's model is 8-bit, and the notes name no change for it on an M5. Whether its replies still
+  equal 0.3.6.2's is unverified.
+- 0.3.6.3: `--decode-share` (default 0.25). While a prompt prefills, running replies keep decoding for that share of
+  each chunk's time. 0.3.6.2 prefilled whole prompts first, which `--decode-share 0` restores. Timings under
+  concurrency change; one request at a time does not.
+- 0.4.0: a stream holds memory for its next 2,048 tokens, not its whole reply, so more streams fit. When memory
+  runs short, kept prompts go first, then the newest streams wait, then the newest ends with an error naming
+  `--parallel`. 0.4.0 also sizes the window the same way on every start (#95). The refused start of 2026-09-30
+  09:26 (below) may therefore not recur, but that is unverified.
 
-After upgrading:
-1. `npm run test:real`: SPEC §6.1, §6.3, §6.4, §6.6 and §6.8 on the new version.
-2. Keep a real serve log as `test/fixtures/serve-log-<version>.txt`, and add a test that none of its lines is
-   `unknown`. That is how the K3 log is tested.
-3. Add the new flags to `FLAGS` in `src/shared/config.ts` and to the test's copy of `serve --help`.
+**What changed for the app** (0.5.0's source, and its `serve --help`, `models` and `info` outputs recorded on this
+Mac; the fixtures hold both versions' help):
+- **Flags:** `--vision` and `--vision-urls` (endpoint) and `--decode-share` (drafting), all from 0.3.6.3, and
+  `--min-p` (generation, 0.5.0). `--reasoning-effort`'s default changed as above. Nothing was removed.
+- **The concurrency line** names the shared round's streams (`a shared round up to 1.40 GB at 8 streams; …`). The
+  old pattern no longer matched it, so it would have become an unknown line. It now parses.
+- **The fitted context line** (no `--context`) adds "and still keep its prompt for the next turn".
+- **New lines:** `requests up to N tokens keep their prompt for the next turn in the X GiB memory budget; a longer
+  one is served, and its next turn prefills again`, printed with `--context` when the budget keeps less (N counts
+  prompt and reply). Also `memory: N of M streams wait for room (newest first)` and `memory: ended req-…, the
+  newest of M streams`. That request gets an error, and no `done` line or `request error` line is printed for it.
+  Also a boxed `WARNING: …` (a prompt kernel that does not build) and notes (image encoder, Bonsai widening, an MTP
+  layer type).
+- **Unchanged:** the `done` line, `/health` (the live token totals of #79 are on the CUDA server only), access lines,
+  refusal messages, `info` for the 27B, and `update --check`'s output. Also SIGUSR1: both versions arm
+  faulthandler's dump before printing the memory budget line.
+- `tensorfold models` lists two new families: DeepSeek-V4-Flash and Ternary Bonsai 2.
+
+**Recorded from the real 0.5.0 on this Mac:** `--version`, `serve --help`, `models`, `info` for every local
+checkpoint, and two serve sessions from Peter's `npm run test:real` of 2026-09-30 10:43. They are the fixtures
+`serve-log-0.5.0-endorsed-2026-09-30.txt` (the endorsed flags) and `serve-log-0.5.0-probe-2026-09-30.txt` (a
+36,743-token probe, a SIGUSR1 stack dump on stderr, and the stop). They confirm:
+- the concurrency line's `at 8 streams`;
+- `requests up to 49,664 tokens keep their prompt …`;
+- 0.5.0 warming and saving the system block for its kernels (`warming 1 saved system block(s)`, `saved
+  system-block snapshot tokens=847`, `warmed system block tokens=847 of 847`);
+- Python 3.14's faulthandler, which names each thread (`Thread 0x… [tensorfold-engine] (most recent call first):`).
+
+The memory wait and end lines, the boxed warning, the fitted context line and the image encoder line are still
+known from the source only.
+
+**A line the app never knew, 0.3.6.2 included.** As it stops, the lane engine saves the newest conversations under
+its own tag: `[lanes] saved conversation checkpoint tokens=36738 (2.5 GiB) in 0.4s`. The source has more tagged
+lines: `[lanes]` (a failed conversation save, and the profiling lines of `TF_PROFILE` and the like) and the families'
+`[glm5]`, `[gemma4]`, `[nemotron]` and `[deepseek_v4]` startup lines. The parser read only `[tensorfold]`, and no
+check caught it until the acceptance run began to fail on unknown lines. It now reads them all: the save is a
+`snapshot`, a failed save an error, the profiling lines `diagnostic` notices, and the families' lines notes.
 
 ## Acceptance run
 
 `npm run test:real` on this Mac (M5 Max, 64 GB) against TensorFold 0.3.6.2 and Qwen3.8-27B-MLX-8bit, with LM Studio
-empty. It drives the app through its UI.
+empty. It drives the app through its UI. The runs below are 0.3.6.2's, then 0.5.0's (the last one).
 
 **2026-09-29 15:22: both tests pass.**
 - §6.1: the endorsed preset (`… serve …/Qwen3.8-27B-MLX-8bit --port 8080 --context 89600 --reasoning-effort medium
@@ -181,10 +221,51 @@ run with `-t 6.5`).
 - **Cleaned output:** the script's spinner reached the card as raw terminal escape codes. Command output is now
   cleaned: the codes are removed, and a redrawn line shows only its last state.
 
+**2026-09-30 10:43–10:45: TensorFold 0.5.0, run by Peter.** Everything passed but one line the parser did not
+know (fixed above).
+- §6.1 passes. The run found 0.5.0 and the 38 flags of its `serve --help`, all of them in the form. The endorsed
+  preset was serving after 35.2 s ("loaded in 34.8 s"), and the header showed "prompts kept ≤ 49,664". It stopped
+  with exit 0, and all 14 lines were known. `update --check`: "0.5.0 is the latest release".
+  - This start used the endorsed flags, and so the default snapshot folder, as Peter's own server does. TensorFold
+    warmed the saved system block for 0.5.0's kernels, and saved it into `~/.cache/tensorfold/prefix-snapshots`: one
+    847-token block, 221 MB. His own first 0.5.0 start would have done the same.
+- §6.3, §6.4, §6.6, §6.8 pass.
+  - Serving after 29.8 s. The gauge rose from 31.09 to 36.42 GiB during the 36,743-token prefill.
+  - Measured against the server's `done` line: 59.09 s to the first token (59.08), tok/s 35.2 (36.0). Prefill
+    59.02 s (623 tok/s), drafts 11 of 30 accepted.
+  - The POST's access line came 20 ms after the click, and the `done` line was in the feed. The snapshot reproduced
+    the command line. The window made 4 requests, all to its own files.
+  - "Dump stacks": the stacks of 4 threads, 11 ms after SIGUSR1, and the server kept serving.
+  - On stop, the conversation (36,738 tokens, 2.5 GiB) was saved in the test's folder. Its `[lanes]` line was the
+    one unknown to the parser. That failed the test, which kept its 2.4 GB folder in the temp directory; a failed
+    run now keeps the logs only.
+- **Against 0.3.6.2** (the 09:26 run):
+  - Time to first token 59.1 s against 59.0, prefill 623 against 620 tok/s.
+  - The 16-token reply ran at 36.0 tok/s against 44.9. Four rounds are too few to compare decode speed; the bench is
+    the measure.
+  - Loading took 29.6–34.8 s against 24–25 s.
+  - `--context 89600` was admitted on both starts.
+  - Past 2,112 tokens, a stream grows 64 KB a token against 114 KB. The concurrency line says 4 streams of 8,192
+    tokens fit against the K3 run's 2, with 6.8 GB in use elsewhere against 8.6.
+  - Requests up to 49,664 tokens, reply included, keep their prompt for the next turn. CodeLead's 20–27k-token prompts
+    are within it.
+
 **Not run:**
 - A real `pull`, so huggingface.co from the CLI child (§6.8) was not observed.
+- The acceptance run on 0.5.0 after the `[lanes]` fix. The fix is tested on the recorded lines.
 
-## Decisions (2026-09-29)
+## Decisions (2026-09-29, 2026-09-30)
+
+- **The form follows the installed binary.** The app reads `serve --help` once per binary and version, about 50 ms.
+  A flag the binary lacks is dimmed with the release that added it ("tensorfold 0.3.6.2 has no --min-p (it came in
+  0.5.0)"), and setting it is an error. A flag the binary lists but the app's table lacks (a later release's)
+  gets a plain field under "More flags": a switch, a choice, or text passed as typed.
+- **The update check runs only when asked,** from Settings: `tensorfold update --check`, whose request to
+  api.github.com is the CLI's. The app never installs. It shows `tensorfold update` to copy, because an upgrade
+  changes the environment a bench runs in.
+- **"Dump stacks" sends SIGUSR1** only once the memory budget line is out, since TensorFold arms the dump just
+  before it and the signal would end the process earlier. It is sent only when the binary is a Python entry point,
+  which the venv's is. A shell wrapper that does not exec Python would take the signal itself.
 
 - **Servers the app did not start are out of scope.** A server started by a bench runner, for example, shows up
   only as the port being in use. The port check names the model it serves.

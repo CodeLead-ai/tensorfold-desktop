@@ -45,17 +45,19 @@ describe('tensorfold info and models', () => {
     expect(infoError(fixture('tensorfold-info-gguf.stderr.txt'))).toMatch(/^\[Errno 2\] No such file or directory/)
   })
 
-  it('reads the families of `tensorfold models`', () => {
+  it('reads the families of `tensorfold models` (0.5.0, and 0.3.6.2)', () => {
+    expect(parseModels(fixture('tensorfold-models-0.3.6.2.txt')).map((f) => f.modelType)).toEqual(['gemma4', 'gemma4_text', 'glm5_next', 'nemotron_h', 'qwen3_5', 'qwen3_5_moe', 'qwen4_exp'])
     const families = parseModels(fixture('tensorfold-models.txt'))
-    expect(families.map((f) => f.modelType)).toEqual(['gemma4', 'gemma4_text', 'glm5_next', 'nemotron_h', 'qwen3_5', 'qwen3_5_moe', 'qwen4_exp'])
+    expect(families.map((f) => f.modelType)).toEqual(['deepseek_v4', 'gemma4', 'gemma4_text', 'glm5_next', 'nemotron_h', 'prism_hadamard_qwen35', 'qwen3_5', 'qwen3_5_moe', 'qwen4_exp'])
     expect(families.find((f) => f.modelType === 'qwen3_5')).toEqual({
       title: 'Qwen3.8 dense',
       modelType: 'qwen3_5',
       engines: ['MLX lane engine', 'CUDA engine'],
       kernels: 'qwen/dense/v1',
-      models: ['Vontra/Qwen3.8-27B-MLX-4bit', 'turboderp/Qwen3.8-27B-exl3'],
+      models: ['Vontra/Qwen3.8-27B-MLX-4bit', 'turboderp/Qwen3.8-27B-exl3', 'nvidia/Qwen3.8-27B-NVFP4'],
       drafters: ['z-lab/Qwen3.8-27B-DFlash2']
     })
+    expect(families.find((f) => f.modelType === 'prism_hadamard_qwen35')).toMatchObject({ title: 'Ternary Bonsai 2', drafters: ['z-lab/Qwen3.8-27B-DFlash2'] })
     expect(familyFor(families, 'qwen3_5_moe', 'darwin')).toBeNull()
     expect(familyFor(families, 'qwen3_5_moe', 'linux')?.title).toBe('Qwen3.6 MoE')
   })
@@ -131,12 +133,14 @@ describe('serving snapshot (SPEC §3.10, §6.6)', () => {
     const { buildServeArgv, buildServeEnv, formatCommandLine } = await import('@shared/config')
     const configs: ServeConfig[] = [applyPreset(emptyConfig(model), 'endorsed')]
     const every = applyPreset(emptyConfig(model), 'serial')
-    every.endpoint = { host: '0.0.0.0', port: 9000, name: 'q', alias: ['a', 'b'] }
-    every.generation = { ...every.generation, thinking: false, topK: 20, temperature: 0.6 }
-    every.drafting = { ...every.drafting, parallel: 'auto', ssdExperts: 12.5, snapshotDir: '/tmp/s' }
+    every.endpoint = { host: '0.0.0.0', port: 9000, name: 'q', alias: ['a', 'b'], vision: true, visionUrls: true }
+    every.generation = { ...every.generation, thinking: false, topK: 20, temperature: 0.6, minP: 0.05 }
+    every.drafting = { ...every.drafting, parallel: 'auto', decodeShare: 0, ssdExperts: 12.5, snapshotDir: '/tmp/s' }
     every.nvidia = { tp: 2, kvDtype: 'int8' }
     every.env = { memoryLimitGb: 51.8 }
     configs.push(every)
+    // a newer TensorFold's flags, unknown to the app's table
+    configs.push({ ...applyPreset(emptyConfig(model), 'endorsed'), extra: { '--future-share': '0.5', '--turbo': true } })
     for (const config of configs) {
       const state = servingState(config)
       state.argv = buildServeArgv(config)

@@ -1,0 +1,79 @@
+[tensorfold] memory budget 44.8 GiB: MLX's buffers up to 41.8 GiB, 3 GiB for the rest of the process; TENSORFOLD_MEMORY_LIMIT_GB can raise it to 51.8
+[tensorfold] loading Qwen3.8-27B-MLX-8bit: Qwen3.8 dense (qwen3_5)
+[tensorfold] lane kernels on: 9 matmul shapes warmed, fused projections {'zba': 48, 'kv': 16, 'gu': 64}
+[tensorfold] drafter /Users/peter/.cache/huggingface/hub/models--z-lab--Qwen3.8-27B-DFlash2/snapshots/50307d4c4cde6860d4eee73e2547cd786fe8e8a4 block=8 bits=4
+[tensorfold] lane kernels: windows of up to 32 rows reproduce one-row steps here (ms by rows 1: 58.1, 2: 60.3, 4: 62.3, 8: 65.1, 16: 68.7, 17: 74.2, 32: 80.2, 64: 110.2, 128: 205.3)
+[tensorfold] 31.1 GiB of weights kept resident
+[tensorfold] prompt chunks of up to 2,048 tokens, cut at replies 256+ tokens apart
+[tensorfold] concurrency: up to 8 requests share each round; memory budget 37.4 GB (MLX's share 41.8 GB, or 70% of 64 GB less 7.4 GB in use elsewhere); a stream 166 MB at 64 tokens, 394 MB at 2,112, then 64.0 KB a token; a shared round up to 1.39 GB at 8 streams; 3 streams of 8,192 tokens fit now (more wait their turn)
+[tensorfold] requests up to 49,664 tokens keep their prompt for the next turn in the 44.8 GiB memory budget; a longer one is served, and its next turn prefills again
+[tensorfold] serving Qwen3.8-27B-MLX-8bit at http://127.0.0.1:8080/v1 (sampling: temperature 1.0, top_k 20, top_p 0.95; drafts: on; context: 89600; loaded in 29.6s)
+[tensorfold] 127.0.0.1 "GET /health HTTP/1.1" 200 -
+[tensorfold] 127.0.0.1 "GET /health HTTP/1.1" 200 -
+[tensorfold] 127.0.0.1 "POST /v1/chat/completions HTTP/1.1" 200 -
+[tensorfold] 127.0.0.1 "GET /health HTTP/1.1" 200 -
+[tensorfold] 127.0.0.1 "GET /health HTTP/1.1" 200 -
+[tensorfold] 127.0.0.1 "GET /health HTTP/1.1" 200 -
+[tensorfold] 127.0.0.1 "GET /health HTTP/1.1" 200 -
+[tensorfold] 127.0.0.1 "GET /health HTTP/1.1" 200 -
+[tensorfold] 127.0.0.1 "GET /health HTTP/1.1" 200 -
+[tensorfold] 127.0.0.1 "GET /health HTTP/1.1" 200 -
+[tensorfold] 127.0.0.1 "GET /health HTTP/1.1" 200 -
+[tensorfold] 127.0.0.1 "GET /health HTTP/1.1" 200 -
+[tensorfold] 127.0.0.1 "GET /health HTTP/1.1" 200 -
+[tensorfold] 127.0.0.1 "GET /health HTTP/1.1" 200 -
+[tensorfold] 127.0.0.1 "GET /health HTTP/1.1" 200 -
+[tensorfold] 127.0.0.1 "GET /health HTTP/1.1" 200 -
+[tensorfold] 127.0.0.1 "GET /health HTTP/1.1" 200 -
+[tensorfold] 127.0.0.1 "GET /health HTTP/1.1" 200 -
+[tensorfold] 127.0.0.1 "GET /health HTTP/1.1" 200 -
+[tensorfold] 127.0.0.1 "GET /health HTTP/1.1" 200 -
+[tensorfold] 127.0.0.1 "GET /health HTTP/1.1" 200 -
+[tensorfold] 127.0.0.1 "GET /health HTTP/1.1" 200 -
+[tensorfold] 127.0.0.1 "GET /health HTTP/1.1" 200 -
+[tensorfold] 127.0.0.1 "GET /health HTTP/1.1" 200 -
+[tensorfold] 127.0.0.1 "GET /health HTTP/1.1" 200 -
+[tensorfold] 127.0.0.1 "GET /health HTTP/1.1" 200 -
+[tensorfold] 127.0.0.1 "GET /health HTTP/1.1" 200 -
+[tensorfold] 127.0.0.1 "GET /health HTTP/1.1" 200 -
+[tensorfold] 127.0.0.1 "GET /health HTTP/1.1" 200 -
+[tensorfold] 127.0.0.1 "GET /health HTTP/1.1" 200 -
+[tensorfold] 127.0.0.1 "GET /health HTTP/1.1" 200 -
+[tensorfold] 127.0.0.1 "GET /health HTTP/1.1" 200 -
+[tensorfold] 127.0.0.1 "GET /health HTTP/1.1" 200 -
+[tensorfold] done req-acbb439bb025 prompt=36743 cached=0 thinking=True effort=low tokens=16 sha=8cffff2e5f66 finish=length tok/s=36.0 ttft=59.08s prefill=59.02s rounds=4 accepted=11/30 ms/round=82.9 forward=82.9 draft=0.0 post=0.0 rows=8.5 checkpoints=1 (2.49 GiB, hits=0 misses=1 evictions=0)
+Thread 0x00000003aab93000 [Thread-2 (process_request_thread)] (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py", line 729 in readinto
+  File "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py", line 464 in handle_one_request
+  File "/Users/peter/Projects/codelead-bench/tensorfold-venv/lib/python3.14/site-packages/tensorfold/server/stacks.py", line 35 in handle_one_request
+  File "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/server.py", line 498 in handle
+  File "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socketserver.py", line 766 in __init__
+  File "__init__", line ??? in __init__
+  <invalid frame>
+
+Thread 0x0000000375db7000 [tensorfold-watchdog] (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
+  File "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 670 in wait
+  File "/Users/peter/Projects/codelead-bench/tensorfold-venv/lib/python3.14/site-packages/tensorfold/server/scheduler.py", line 180 in _watch
+  File "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1024 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1082 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1044 in _bootstrap
+
+Thread 0x0000000374263000 [tensorfold-engine] (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 373 in wait
+  File "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/queue.py", line 210 in get
+  File "/Users/peter/Projects/codelead-bench/tensorfold-venv/lib/python3.14/site-packages/tensorfold/server/scheduler.py", line 73 in get
+  File "/Users/peter/Projects/codelead-bench/tensorfold-venv/lib/python3.14/site-packages/tensorfold/server/scheduler.py", line 291 in _loop
+  File "/Users/peter/Projects/codelead-bench/tensorfold-venv/lib/python3.14/site-packages/tensorfold/server/scheduler.py", line 267 in _run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1024 in run
+  File "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1082 in _bootstrap_inner
+  File "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/threading.py", line 1044 in _bootstrap
+
+Current thread 0x00000001f46fe180 (most recent call first):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/selectors.py", line 398 in select
+  File "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socketserver.py", line 235 in serve_forever
+  File "/Users/peter/Projects/codelead-bench/tensorfold-venv/lib/python3.14/site-packages/tensorfold/cli.py", line 603 in _serve_mlx
+  File "/Users/peter/Projects/codelead-bench/tensorfold-venv/lib/python3.14/site-packages/tensorfold/cli.py", line 482 in cmd_serve
+  File "/Users/peter/Projects/codelead-bench/tensorfold-venv/lib/python3.14/site-packages/tensorfold/cli.py", line 150 in main
+  File "/Users/peter/Projects/codelead-bench/tensorfold-venv/bin/tensorfold", line 6 in <module>
+[lanes] saved conversation checkpoint tokens=36738 (2.5 GiB) in 0.4s

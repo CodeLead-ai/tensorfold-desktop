@@ -12,10 +12,45 @@ describe('fake-tensorfold: the CLI commands', () => {
   it('prints the installed version', async () => {
     const run = runMock(['--version'])
     expect(await run.exited).toEqual({ code: 0, signal: null })
-    expect(run.stdout).toEqual(['tensorfold 0.3.6.2'])
+    expect(run.stdout).toEqual(['tensorfold 0.5.0'])
   })
 
-  it('prints `info` exactly as the real 0.3.6.2 does for the 27B 8-bit', async () => {
+  it('prints `serve --help` as the real 0.5.0 does, or as 0.3.6.2 does when it plays that version', async () => {
+    const run = runMock(['serve', '--help'])
+    expect((await run.exited).code).toBe(0)
+    expect(run.stdout.join('\n') + '\n').toBe(fixture('tensorfold-serve-help-0.5.0.txt'))
+    const old = runMock(['serve', '--help'], { MOCK_TENSORFOLD_VERSION: '0.3.6.2' })
+    await old.exited
+    expect(old.stdout.join('\n') + '\n').toBe(fixture('tensorfold-serve-help-0.3.6.2.txt'))
+    const version = runMock(['--version'], { MOCK_TENSORFOLD_VERSION: '0.3.6.2' })
+    await version.exited
+    expect(version.stdout).toEqual(['tensorfold 0.3.6.2'])
+  })
+
+  it("refuses a flag its version's serve --help does not list, as argparse does", async () => {
+    const run = runMock(['serve', MOCK_MODEL, '--min-p', '0.05'], { MOCK_TENSORFOLD_VERSION: '0.3.6.2' })
+    expect((await run.exited).code).toBe(2)
+    expect(run.stderr).toContain('tensorfold: error: unrecognized arguments: --min-p 0.05')
+    const urls = runMock(['serve', MOCK_MODEL, '--vision-urls'])
+    expect((await urls.exited).code).toBe(1)
+    expect(run.stdout).toEqual([])
+    expect(urls.stderr).toBe('tensorfold: --vision-urls needs --vision\n')
+  })
+
+  it('answers `update --check` as update.py does, asking no one', async () => {
+    const latest = runMock(['update', '--check'])
+    expect((await latest.exited).code).toBe(0)
+    expect(latest.stdout).toEqual(['[tensorfold] TensorFold 0.5.0 is the latest release'])
+    const newer = runMock(['update', '--check'], { MOCK_TENSORFOLD_LATEST: '0.6.0' })
+    await newer.exited
+    expect(newer.stdout).toEqual(['[tensorfold] TensorFold 0.6.0 is available (this is 0.5.0)'])
+    const offline = runMock(['update', '--check'], { MOCK_TENSORFOLD_LATEST: 'offline' })
+    expect((await offline.exited).code).toBe(1)
+    expect(offline.stderr).toMatch(/^\[tensorfold\] could not reach GitHub/)
+    expect((await runMock(['update']).exited).code).toBe(1)
+  })
+
+  it('prints `info` exactly as the real 0.3.6.2 and 0.5.0 do for the 27B 8-bit', async () => {
     const run = runMock(['info', MOCK_MODEL])
     expect((await run.exited).code).toBe(0)
     expect(run.stdout.join('\n') + '\n').toBe(fixture('tensorfold-info-qwen27b-8bit.txt'))
@@ -71,6 +106,46 @@ describe('fake-tensorfold serve', () => {
     expect(await run.exited).toEqual({ code: 0, signal: null })
     expect(run.stdout.map(parseLine).filter((e) => e.kind === 'unknown')).toEqual([])
     expect(run.stderr).toBe('')
+    // the lane engine saves the conversation as it stops
+    expect(parseLine(run.stdout[run.stdout.length - 1] as string)).toMatchObject({ kind: 'snapshot', action: 'saved', scope: 'conversation', tokens: reply.usage.prompt_tokens + reply.usage.completion_tokens - 5 })
+  })
+
+  it("prints 0.5.0's recorded startup lines: the round's streams, and which prompts are kept", async () => {
+    const run = runMock(['serve', MOCK_MODEL, '--port', String(await freePort()), '--context', '89600'], { MOCK_TENSORFOLD_INTERVAL_MS: '0' })
+    await run.waitFor((l) => l.includes('] serving '))
+    run.child.kill('SIGTERM')
+    await run.exited
+    const events = run.stdout.map(parseLine)
+    expect(events.find((e) => e.kind === 'startup' && e.what === 'concurrency')).toMatchObject({ roundGb: 1.39, roundStreams: 8, fits: { streams: 4, tokens: 8192 } })
+    expect(events.find((e) => e.kind === 'startup' && e.what === 'resumable')).toEqual({ kind: 'startup', what: 'resumable', tokens: 49664, budgetGib: 44.8 })
+    expect(events.find((e) => e.kind === 'startup' && e.what === 'warming')).toEqual({ kind: 'startup', what: 'warming', blocks: 1 })
+    expect(events.filter((e) => e.kind === 'unknown')).toEqual([])
+  })
+
+  it('prints a stack dump on SIGUSR1 once armed, and ends on it before', async () => {
+    const run = runMock(['serve', MOCK_MODEL, '--port', String(await freePort())], { MOCK_TENSORFOLD_INTERVAL_MS: '0' })
+    await run.waitFor((l) => l.includes('] serving '))
+    run.child.kill('SIGUSR1')
+    await new Promise((r) => setTimeout(r, 300))
+    expect(run.stderr).toMatch(/^Thread 0x[0-9a-f]+ \[tensorfold-watchdog\] \(most recent call first\):\n {2}File "/)
+    expect(run.stderr).toContain('Current thread 0x')
+    run.child.kill('SIGTERM')
+    expect(await run.exited).toEqual({ code: 0, signal: null })
+
+    const early = runMock(['serve', MOCK_MODEL, '--port', String(await freePort())], { MOCK_TENSORFOLD_LOAD_MS: '5000' })
+    await new Promise((r) => setTimeout(r, 100))
+    early.child.kill('SIGUSR1')
+    expect((await early.exited).code).toBe(158)
+  })
+
+  it("replays 0.4.0+'s memory lines under pressure: streams wait, and the newest ends", async () => {
+    const run = runMock(['serve', MOCK_MODEL, '--port', String(await freePort())], { MOCK_TENSORFOLD_MEMORY: 'pressure', MOCK_TENSORFOLD_TIME_SCALE: '0.0002', MOCK_TENSORFOLD_INTERVAL_MS: '5' })
+    await run.waitFor((l) => l.includes('streams wait for room') && l.includes(' 0 of '), 20_000)
+    run.child.kill('SIGTERM')
+    await run.exited
+    const notices = run.stdout.map(parseLine).filter((e) => e.kind === 'notice')
+    expect(notices.map((e) => (e.kind === 'notice' ? e.what : ''))).toEqual(['memory-wait', 'memory-ended', 'memory-wait'])
+    expect(notices[1]).toMatchObject({ fields: { streams: 3 } })
   })
 
   it('replays the K3 requests on a timer', async () => {

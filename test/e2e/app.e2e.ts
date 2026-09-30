@@ -9,24 +9,31 @@ let app: ElectronApplication
 let page: Page
 let userData: string
 
-beforeAll(async () => {
-  userData = mkdtempSync(join(tmpdir(), 'tfdesk-e2e-'))
+/** The built app on a throwaway profile, against the mock (playing 0.5.0 unless `mockEnv` says otherwise). */
+async function launch(dir: string, mockEnv: Record<string, string> = {}): Promise<{ app: ElectronApplication; page: Page }> {
   const env = { ...process.env } as Record<string, string>
   delete env['ELECTRON_RUN_AS_NODE']
-  app = await electron.launch({
+  const launched = await electron.launch({
     args: [ROOT],
     env: {
       ...env,
       TENSORFOLD_DESK_MOCK: '1',
-      TENSORFOLD_DESK_USER_DATA: userData,
+      TENSORFOLD_DESK_USER_DATA: dir,
       MOCK_TENSORFOLD_LOAD_MS: '600',
       MOCK_TENSORFOLD_TIME_SCALE: '0.003',
       MOCK_TENSORFOLD_INTERVAL_MS: '100',
-      FAKE_LMS_STATE: join(userData, 'fake-lms.json')
+      FAKE_LMS_STATE: join(dir, 'fake-lms.json'),
+      ...mockEnv
     }
   })
-  page = await app.firstWindow()
-  await page.locator('text=Configuration').waitFor()
+  const window = await launched.firstWindow()
+  await window.locator('text=Configuration').waitFor()
+  return { app: launched, page: window }
+}
+
+beforeAll(async () => {
+  userData = mkdtempSync(join(tmpdir(), 'tfdesk-e2e-'))
+  ;({ app, page } = await launch(userData, { MOCK_TENSORFOLD_MEMORY: 'pressure' }))
 })
 
 afterAll(async () => {
@@ -68,18 +75,56 @@ describe('the app against the mock', () => {
     expect(chips).toContain(String(port))
     expect(chips).toContain('89,600')
     expect(chips).toContain('z-lab/Qwen3.8-27B-DFlash2')
+    // 0.4.0+: the endorsed --context is past what the budget keeps for a next turn
+    expect(chips).toMatch(/prompts kept\s*≤ 49,664/)
 
     await page.locator('text=of what MLX may use').waitFor({ timeout: 15_000 })
 
     await page.locator('nav.rail').getByRole('button', { name: /Requests/ }).click()
     await expect.poll(() => page.locator('table.data tbody tr').count(), { timeout: 30_000 }).toBeGreaterThan(3)
+    // the mock's memory pressure ended one stream (0.4.0+'s `memory: ended` line)
+    await page.locator('table.data tr.refused .tag:text-is("ended for memory")').waitFor({ timeout: 30_000 })
+    expect(await page.locator('.tile:has(.label:text-is("Requests"))').getAttribute('title')).toMatch(/1 of them ended when memory ran short/)
 
     await page.locator('nav.rail').getByRole('button', { name: /Log/ }).click()
     await expect.poll(() => page.locator('.log-line').count()).toBeGreaterThan(10)
+    // SIGUSR1: TensorFold's stack dump arrives on stderr
+    await page.getByRole('button', { name: 'Dump stacks' }).click()
+    await page.locator('.log-line.s-stderr:has-text("Current thread 0x")').first().waitFor({ timeout: 15_000 })
+    expect(await header().locator('.state').innerText()).toBe('Serving')
 
     await header().getByRole('button', { name: 'Stop' }).click()
     await header().locator('text=exit 0').waitFor({ timeout: 30_000 })
     expect(await header().locator('.state').innerText()).toBe('Stopped')
+  })
+})
+
+describe('TensorFold releases', () => {
+  it('checks for a newer release and says this one is the latest', async () => {
+    await page.locator('nav.rail').getByRole('button', { name: /Settings/ }).click()
+    await page.getByRole('button', { name: 'Check for a newer release' }).click()
+    await page.locator('text=0.5.0 is the latest release').waitFor({ timeout: 15_000 })
+    await page.locator('nav.rail').getByRole('button', { name: /Server/ }).click()
+  })
+
+  it("follows an older binary's serve --help, and offers the command that installs a newer release", async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tfdesk-e2e-old-'))
+    const old = await launch(dir, { MOCK_TENSORFOLD_VERSION: '0.3.6.2', MOCK_TENSORFOLD_LATEST: '0.6.0' })
+    try {
+      const minP = old.page.locator('label.field:has(code:text-is("--min-p"))')
+      await minP.locator('.field-help:text-is("tensorfold 0.3.6.2 has no --min-p (it came in 0.5.0)")').waitFor({ timeout: 15_000 })
+      expect(await minP.locator('input').isDisabled()).toBe(true)
+      expect(await old.page.locator('label.field:has(code:text-is("--context")) input').isDisabled()).toBe(false)
+
+      await old.page.locator('nav.rail').getByRole('button', { name: /Settings/ }).click()
+      await old.page.getByRole('button', { name: 'Check for a newer release' }).click()
+      await old.page.locator('text=TensorFold 0.6.0 is out (this is 0.3.6.2)').waitFor({ timeout: 15_000 })
+      expect(await old.page.locator('pre.command').first().innerText()).toMatch(/fake-tensorfold\.mjs update$/)
+      expect(await old.page.locator('text=release notes: https://github.com/ashhart/TensorFold/releases/tag/v0.6.0').count()).toBe(1)
+    } finally {
+      await old.app.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
 

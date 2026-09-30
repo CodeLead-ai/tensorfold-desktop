@@ -32,3 +32,19 @@ describe('session info from Appendix A', () => {
     expect(applyEvent(before, { kind: 'unknown', line: 'x' })).toBe(before)
   })
 })
+
+describe("0.4.0+'s memory lines", () => {
+  const T = (body: string) => parseLine(`[tensorfold] ${body}`)
+
+  it('keeps the kept-prompt limit, the streams waiting for memory, and the requests memory ended', () => {
+    const info = [
+      T('requests up to 61,440 tokens keep their prompt for the next turn in the 44.8 GiB memory budget; a longer one is served, and its next turn prefills again'),
+      T('memory: 2 of 5 streams wait for room (newest first)'),
+      T('memory: ended req-0123456789ab, the newest of 5 streams')
+    ].reduce(applyEvent, emptySessionInfo())
+    expect(info.resumable).toEqual({ kind: 'startup', what: 'resumable', tokens: 61440, budgetGib: 44.8 })
+    expect(info.memoryWait).toEqual({ waiting: 2, streams: 5 })
+    expect(info.memoryEnded).toBe(1)
+    expect(applyEvent(info, T('memory: 0 of 4 streams wait for room (newest first)')).memoryWait).toEqual({ waiting: 0, streams: 4 })
+  })
+})

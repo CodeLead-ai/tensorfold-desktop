@@ -1,11 +1,15 @@
 /**
- * SPEC §6 against the real `tensorfold serve` and Qwen3.8-27B-MLX-8bit, through the app's UI:
+ * SPEC §6 against the real `tensorfold serve` (whichever version is installed) and Qwen3.8-27B-MLX-8bit, through
+ * the app's UI:
  *   §6.1 the endorsed preset reaches "serving" with model, port, context and "loaded in"; stop returns to
  *        "stopped" with the exit code,
  *   §6.3 a done line reaches the request feed within a second,
  *   §6.4 the memory gauge moves during a long prefill,
  *   §6.6 the exported snapshot reproduces the command line,
  *   §6.8 the window makes no request beyond its own files.
+ * Also: the app knows every line the server prints on stdout (each session's lines go to
+ * .tmp/serve-log-<version>-<time>.txt, fixture material), the form has every flag of the binary's serve --help,
+ * "Dump stacks" gets the stacks from the real server, and `tensorfold update --check` answers (it asks GitHub).
  * Needs the machine's memory: LM Studio must have nothing loaded (the test checks, and stops if it has).
  * The second run passes --snapshot-dir <tmp>/prefix-snapshots. TensorFold keeps conversation snapshots in the
  * sibling session-snapshots folder, so the probe's conversation stays in the temporary folder and never reaches
@@ -15,12 +19,13 @@
  *   TFDESK_REAL_LMS=1 TFDESK_RESTORE_COMMAND='<your reload command>' npx vitest run -c vitest.real.config.ts -t 6.5
  * It needs LM Studio running with a model loaded and idle, and port 8080 free.
  */
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { _electron as electron, type ElectronApplication, type Page } from 'playwright-core'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import type { DeskApi, ServerState } from '@shared/api'
+import { FLAGS } from '@shared/config'
 import type { LogLine } from '@shared/events'
 import { reproduceCommandLine, type ServingSnapshot } from '@shared/snapshot'
 import { ROOT } from '../helpers'
@@ -65,14 +70,33 @@ afterAll(async () => {
   const state = await page?.evaluate(() => window.tfdesk.getSession().then((s) => s.state.status)).catch(() => 'unknown')
   if (state !== 'stopped') await page?.evaluate(() => window.tfdesk.stopServer()).catch(() => undefined)
   await app?.close()
-  if (failed) log(`kept for a look: ${work} (the app's logs are in profile/logs)`)
-  else rmSync(work, { recursive: true, force: true })
+  if (failed) {
+    // The logs stay for a look; the snapshots TensorFold saved there (a 36k-token conversation is 2.5 GiB) do not.
+    for (const big of ['session-snapshots', 'prefix-snapshots']) rmSync(join(work, big), { recursive: true, force: true })
+    log(`kept for a look: ${work} (the app's logs are in profile/logs)`)
+  } else rmSync(work, { recursive: true, force: true })
 })
 
 const header = (): ReturnType<Page['locator']> => page.locator('header.header')
 const button = (scope: ReturnType<Page['locator']> | Page, name: string): ReturnType<Page['locator']> => scope.getByRole('button', { name, exact: true })
 const rail = (name: RegExp): ReturnType<Page['locator']> => page.locator('nav.rail').getByRole('button', { name })
 const session = (): Promise<{ lines: LogLine[]; state: ServerState }> => page.evaluate(() => window.tfdesk.getSession()) as never
+
+/**
+ * The session's server lines, kept in .tmp for a fixture; the stdout lines the parser does not know fail the run
+ * (stderr may hold a stack dump, which is plain text).
+ */
+async function everyLineKnown(label: string): Promise<void> {
+  const { lines, state } = await session()
+  const server = lines.filter((l) => l.stream !== 'desk')
+  const file = join(ROOT, '.tmp', `serve-log-${state.version ?? 'unknown'}-${label}-${new Date().toISOString().replace(/[:.]/g, '-')}.txt`)
+  mkdirSync(join(ROOT, '.tmp'), { recursive: true })
+  writeFileSync(file, server.map((l) => l.text).join('\n') + '\n')
+  const unknown = server.filter((l) => l.stream === 'stdout' && l.event.kind === 'unknown').map((l) => l.text)
+  log(`${server.length} server lines kept in ${file}; ${unknown.length} stdout lines unknown to the parser`)
+  for (const text of unknown) log('  unknown:', text)
+  expect(unknown).toEqual([])
+}
 
 /** Refuses to load the 27B beside a model LM Studio holds (SPEC §2.4: unload it first). */
 async function lmStudioIsEmpty(): Promise<void> {
@@ -108,6 +132,12 @@ async function serveAfter(click: () => Promise<void>): Promise<ServerState> {
 describe.skipIf(!available)('SPEC §6 against the real server', () => {
   it('§6.1: the endorsed preset serves, then stops with its exit code', async () => {
     await lmStudioIsEmpty()
+    const binary = await page.evaluate(() => window.tfdesk.detectBinary())
+    log(`tensorfold ${binary.version} at ${binary.path}; serve --help lists ${binary.serveHelp?.length ?? 'no'} flags`)
+    const listed = new Set((binary.serveHelp ?? []).map((f) => f.cli))
+    expect(binary.serveHelp?.length).toBeGreaterThan(0)
+    expect(FLAGS.filter((f) => !listed.has(f.cli)).map((f) => f.cli), "the app's flags the binary lacks").toEqual([])
+    expect((binary.serveHelp ?? []).filter((f) => !FLAGS.some((k) => k.cli === f.cli)).map((f) => f.cli), 'flags new to the app').toEqual([])
     await expect.poll(() => page.locator('pre.command').innerText(), { timeout: 20_000 }).toContain(' serve ')
     const command = (await page.locator('pre.command').innerText()).replace(/\s+/g, ' ')
     log('command:', command)
@@ -121,7 +151,9 @@ describe.skipIf(!available)('SPEC §6 against the real server', () => {
     expect(chips).toContain('port 8080')
     expect(chips).toContain('context 89,600')
     expect(chips).toMatch(/loaded in [\d.]+ s/)
-    expect(chips).toContain('tensorfold 0.3.6.2')
+    expect(chips).toContain(`tensorfold ${binary.version}`)
+    const kept = state.info.resumable
+    log(kept ? `prompts kept up to ${kept.tokens} tokens (with the reply) in the ${kept.budgetGib} GiB budget` : 'no kept-prompt line (the budget keeps the whole window, or TensorFold is older than 0.4.0)')
 
     await button(header(), 'Stop').click()
     await header().locator('text=exit 0').waitFor({ timeout: 90_000 })
@@ -130,6 +162,12 @@ describe.skipIf(!available)('SPEC §6 against the real server', () => {
     expect(s.state.lastExit).toMatchObject({ code: 0, requested: true })
     log('stopped: exit', s.state.lastExit?.code, '· log file', s.state.logFile)
     expect(readFileSync(s.state.logFile as string, 'utf8')).toContain('[tensorfold] serving Qwen3.8-27B-MLX-8bit at http://127.0.0.1:8080/v1')
+    await everyLineKnown('6.1')
+
+    // Asks GitHub from the CLI; offline is an answer too.
+    const update = await page.evaluate(() => window.tfdesk.checkUpdate())
+    log('update --check:', update.ok ? (update.newer ? `${update.latest} is out (this is ${update.current})` : `${update.current} is the latest`) : update.error)
+    expect(update.ok || /could not reach GitHub/.test(update.error ?? '')).toBe(true)
   })
 
   it('§6.3, §6.4, §6.6, §6.8: a long prefill moves the gauge; the feed, the snapshot and the audit hold', async () => {
@@ -204,6 +242,19 @@ describe.skipIf(!available)('SPEC §6 against the real server', () => {
     expect(reproduceCommandLine(snapshot)).toBe(snapshot.commandLine)
     log('snapshot:', path)
 
+    // SIGUSR1: the real server prints every thread's stack on stderr, and keeps serving.
+    const dumpAt = Date.now()
+    expect(await page.evaluate(() => window.tfdesk.dumpStacks())).toEqual({ ok: true })
+    for (;;) {
+      const { lines, state: now } = await session()
+      if (lines.some((l) => l.stream === 'stderr' && l.at >= dumpAt && /^Current thread 0x/.test(l.text))) break
+      if (now.status !== 'serving') throw new Error(`the server left serving after SIGUSR1 (${now.status})`)
+      if (Date.now() - dumpAt > 15_000) throw new Error('no stack dump on stderr 15 s after SIGUSR1')
+      await page.waitForTimeout(250)
+    }
+    const threads = (await session()).lines.filter((l) => l.stream === 'stderr' && l.at >= dumpAt && /^(Current t|T)hread 0x/.test(l.text)).length
+    log(`stack dump: ${threads} threads, ${Date.now() - dumpAt} ms after SIGUSR1; still serving`)
+
     // §6.8: the window asked for nothing beyond its own files.
     const audit = await page.evaluate(() => window.tfdesk.networkAudit())
     const outside = audit.filter((e) => !e.url.startsWith('file:') && !e.url.startsWith('devtools:') && !e.url.startsWith('data:'))
@@ -214,6 +265,7 @@ describe.skipIf(!available)('SPEC §6 against the real server', () => {
     await header().locator('text=exit 0').waitFor({ timeout: 120_000 })
     const kept = existsSync(join(work, 'session-snapshots')) ? 'in the test folder' : 'nowhere (none saved)'
     log(`the probe's conversation snapshot: ${kept}`)
+    await everyLineKnown('probe')
   })
 
   it.skipIf(!lmsRun)('§6.5: without lms, a clear message; with it, unload LM Studio then serve, and stop then restore', async () => {

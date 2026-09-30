@@ -14,6 +14,7 @@ import type { PullState } from '@shared/pull'
 import { rowFromLine, type RequestRow } from '@shared/requests'
 import { emptySessionInfo } from '@shared/session'
 import type { Settings } from '@shared/settings'
+import type { UpdateCheck } from '@shared/update'
 import type { ValidationIssue } from '@shared/validate'
 
 export type ViewId = 'server' | 'requests' | 'checkpoints' | 'probe' | 'log' | 'settings'
@@ -71,6 +72,8 @@ interface DeskStore {
   lastSteps: StepsResult | null
   probes: ProbeResult[]
   probing: string | null
+  updateCheck: UpdateCheck | null
+  checkingUpdate: boolean
 
   init(): Promise<void>
   setView(view: ViewId): void
@@ -90,6 +93,8 @@ interface DeskStore {
   stopAndRestore(): Promise<void>
   runProbe(request: ProbeRequest): Promise<ProbeResult>
   runAlternation(): Promise<void>
+  checkUpdate(): Promise<void>
+  dumpStacks(): Promise<void>
 }
 
 let formTimer: ReturnType<typeof setTimeout> | null = null
@@ -133,6 +138,8 @@ export const useDesk = create<DeskStore>((set, get) => ({
   lastSteps: null,
   probes: [],
   probing: null,
+  updateCheck: null,
+  checkingUpdate: false,
 
   async init() {
     if (get().ready) return
@@ -303,6 +310,20 @@ export const useDesk = create<DeskStore>((set, get) => ({
     const big = await get().runProbe({ prompt: probe.bigPrompt, maxTokens: probe.bigMaxTokens, reasoningEffort: probe.reasoningEffort, stream: true, label: 'alternation 2: a big generation' })
     if (!big.ok) return
     await get().runProbe({ ...base, prompt: probe.prompt, label: 'alternation 3: the prompt, after it' })
+  },
+
+  async checkUpdate() {
+    set({ checkingUpdate: true })
+    try {
+      set({ updateCheck: await api().checkUpdate() })
+    } finally {
+      set({ checkingUpdate: false })
+    }
+  },
+
+  async dumpStacks() {
+    const result = await api().dumpStacks()
+    get().notify(result.ok ? { kind: 'info', text: 'SIGUSR1 sent: the stacks are on stderr, in the Log view.' } : { kind: 'error', text: result.error })
   },
 
   notify(toast) {

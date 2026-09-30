@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
-import { acceptanceRatio, prefillRate, summarize, tokPerSSeries, type RequestRow } from '@shared/requests'
+import { acceptanceRatio, overKept, prefillRate, summarize, tokPerSSeries, type RequestRow } from '@shared/requests'
 import { CopyButton } from '../components/CopyButton'
 import { Segmented } from '../components/Fields'
 import { Sparkline } from '../components/Sparkline'
@@ -13,6 +13,7 @@ type Filter = 'all' | 'done' | 'refused'
 export function RequestsView(): React.JSX.Element {
   const rows = useDesk((s) => s.rows)
   const status = useDesk((s) => s.server.status)
+  const kept = useDesk((s) => s.server.info.resumable?.tokens ?? null)
   const totals = useMemo(() => summarize(rows), [rows])
   const series = useMemo(() => tokPerSSeries(rows, 60), [rows])
   const [filter, setFilter] = useState<Filter>('all')
@@ -28,7 +29,13 @@ export function RequestsView(): React.JSX.Element {
   return (
     <div className="grid">
       <div className="tiles">
-        <Tile label="Requests" value={int(totals.requests)} sub={`${totals.refused} refused · ${totals.failed} failed`} bad={totals.refused + totals.failed > 0} />
+        <Tile
+          label="Requests"
+          value={int(totals.requests)}
+          sub={`${totals.refused} refused · ${totals.failed} failed`}
+          hint={totals.ended ? `${totals.failed} failed, ${totals.ended} of them ended when memory ran short` : undefined}
+          bad={totals.refused + totals.failed > 0}
+        />
         <Tile label="Tokens in" value={compact(totals.tokensIn)} sub={`${compact(totals.cachedIn)} cached`} />
         <Tile label="Tokens out" value={compact(totals.tokensOut)} sub="thinking included" />
         <Tile label="Mean tok/s" value={fixed(totals.meanTokPerS)} sub={`weighted ${fixed(totals.weightedTokPerS)}`} />
@@ -60,6 +67,12 @@ export function RequestsView(): React.JSX.Element {
           <h2>Request feed</h2>
           <span className="muted" style={{ fontSize: 12 }}>
             parsed from the server's stdout{rows.length > SHOWN ? ` · newest ${int(SHOWN)} of ${int(rows.length)}` : ''}
+            {kept !== null && (
+              <span title="TensorFold keeps a request's prompt for its next turn up to this many tokens, prompt and reply; past it the request is served, and its next turn prefills again">
+                {' '}
+                · prompts kept up to {int(kept)} tokens
+              </span>
+            )}
           </span>
           <span className="spacer" />
           <Segmented<Filter>
@@ -99,7 +112,7 @@ export function RequestsView(): React.JSX.Element {
               </thead>
               <tbody>
                 {visible.map((row) => (
-                  <Row key={row.seq} row={row} fresh={row.at > mountedAt.current} />
+                  <Row key={row.seq} row={row} fresh={row.at > mountedAt.current} kept={kept} />
                 ))}
               </tbody>
             </table>
@@ -110,28 +123,32 @@ export function RequestsView(): React.JSX.Element {
   )
 }
 
-function Tile({ label, value, sub, bad }: { label: string; value: string; sub: string; bad?: boolean }): React.JSX.Element {
+function Tile({ label, value, sub, hint, bad }: { label: string; value: string; sub: string; hint?: string; bad?: boolean }): React.JSX.Element {
   return (
-    <div className="tile">
+    <div className="tile" title={hint}>
       <span className="label">{label}</span>
       <span className={`value ${bad ? 'bad' : ''}`}>{value}</span>
-      <span className="sub" title={sub}>
+      <span className="sub" title={hint ?? sub}>
         {sub}
       </span>
     </div>
   )
 }
 
-function Row({ row, fresh }: { row: RequestRow; fresh: boolean }): React.JSX.Element {
+function Row({ row, fresh, kept }: { row: RequestRow; fresh: boolean; kept: number | null }): React.JSX.Element {
   const cls = fresh ? 'fresh' : ''
   if (row.kind === 'done') {
     const e = row.event
     const ratio = acceptanceRatio(e)
+    const over = overKept(e, kept)
     return (
       <tr className={cls}>
         <td className="left faint">{clock(row.at)}</td>
         <td className="left selectable">{e.reqId}</td>
-        <td>{int(e.prompt)}</td>
+        <td className={over ? 'warn' : ''} title={over ? `${int(e.prompt + e.tokens)} tokens with the reply: past the ${int(kept)} whose prompt is kept, so this conversation's next turn prefills again` : undefined}>
+          {over && <span className="over-kept">↻ </span>}
+          {int(e.prompt)}
+        </td>
         <td className={e.cached > 0 ? 'ok' : 'faint'}>{int(e.cached)}</td>
         <td className="left">{e.effort ?? '–'}</td>
         <td className="left">{e.thinking === null ? '–' : e.thinking ? 'yes' : 'no'}</td>
@@ -196,6 +213,18 @@ function Row({ row, fresh }: { row: RequestRow; fresh: boolean }): React.JSX.Ele
           <span className="tag bad">{row.status === 400 ? 'refused' : 'failed'}</span>{' '}
           {row.method} {row.path} answered {row.status}
           {row.status === 400 ? ': the window check refused it before admission; the message went to the client (the log does not keep it).' : '.'}
+        </td>
+      </tr>
+    )
+  }
+  if (row.kind === 'ended') {
+    return (
+      <tr className={`refused ${cls}`}>
+        <td className="left">{clock(row.at)}</td>
+        <td className="left selectable">{row.reqId}</td>
+        <td colSpan={14} className="message">
+          <span className="tag bad">ended for memory</span> the newest of {row.streams} streams when memory ran short, stopped mid-reply so the older ones could finish. The client got an error: retry it, shorten the
+          prompt or max_tokens, or serve with a smaller --parallel.
         </td>
       </tr>
     )

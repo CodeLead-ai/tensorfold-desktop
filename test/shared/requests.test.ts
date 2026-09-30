@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { DoneEvent, LogLine } from '@shared/events'
-import { acceptanceRatio, prefillRate, rowFromLine, summarize, tokPerSSeries, type RequestRow } from '@shared/requests'
+import { acceptanceRatio, overKept, prefillRate, rowFromLine, summarize, tokPerSSeries, type RequestRow } from '@shared/requests'
 import { parseLine } from '../../src/main/LogParser'
 
 function rowsOf(file: string): RequestRow[] {
@@ -54,6 +54,25 @@ describe('session totals', () => {
     // the last done line's running totals, not a sum
     expect(t.cache).toEqual({ count: 0, gib: 0, hits: 22, misses: 31, evictions: 48 })
     expect(t.lastTokPerS).toBe(49.1)
+  })
+
+  it("makes a row of each request memory pressure ended (0.4.0+), counted as failed", () => {
+    const text = '[tensorfold] memory: ended req-0123456789ab, the newest of 5 streams'
+    const line: LogLine = { seq: 7, at: 70, stream: 'stdout', text, event: parseLine(text) }
+    const row = rowFromLine(line)
+    expect(row).toEqual({ kind: 'ended', seq: 7, at: 70, reqId: 'req-0123456789ab', streams: 5 })
+    const waiting = '[tensorfold] memory: 2 of 5 streams wait for room (newest first)'
+    expect(rowFromLine({ seq: 8, at: 80, stream: 'stdout', text: waiting, event: parseLine(waiting) })).toBeNull()
+    expect(summarize([...rowsOf('k3-serve-2026-09-29.txt'), row as RequestRow])).toMatchObject({ requests: 52, refused: 1, failed: 1, ended: 1 })
+  })
+
+  it("tells a request too long to keep its prompt for the next turn (0.4.0+'s limit counts the reply too)", () => {
+    const done = rowsOf('k3-serve-2026-09-29.txt').find((r) => r.kind === 'done' && r.event.prompt > 20000)
+    if (done?.kind !== 'done') throw new Error('the K3 run has long prompts')
+    const total = done.event.prompt + done.event.tokens
+    expect(overKept(done.event, total)).toBe(false)
+    expect(overKept(done.event, total - 1)).toBe(true)
+    expect(overKept(done.event, null)).toBe(false)
   })
 
   it('is empty without requests', () => {

@@ -16,7 +16,8 @@ const result = spawnSync(electron, ['.'], {
     TENSORFOLD_DESK_SCREENS_THEME: process.argv[3] ?? 'dark',
     MOCK_TENSORFOLD_LOAD_MS: '1200',
     MOCK_TENSORFOLD_TIME_SCALE: '0.004',
-    MOCK_TENSORFOLD_INTERVAL_MS: '150'
+    MOCK_TENSORFOLD_INTERVAL_MS: '150',
+    MOCK_TENSORFOLD_MEMORY: 'pressure'
   }
 })
 rmSync(userData, { recursive: true, force: true })

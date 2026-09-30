@@ -1,7 +1,7 @@
 /**
- * The request feed (SPEC §3.4): rows from the log's `done` and `start failed` lines, plus the two kinds of
- * failures the log shows without a request id (HTTP errors on chat completions, and `request error`), and
- * the session's totals.
+ * The request feed (SPEC §3.4): rows from the log's `done` and `start failed` lines, the requests memory
+ * pressure ended (0.4.0+), the two kinds of failures the log shows without a request id (HTTP errors on chat
+ * completions, and `request error`), and the session's totals.
  */
 import type { DoneEvent, LogLine, RefusedEvent } from './events'
 
@@ -13,6 +13,8 @@ export type RequestRow =
   | { kind: 'http'; seq: number; at: number; status: number; method: string; path: string }
   /** `request error: …` or `stream error: …`. */
   | { kind: 'error'; seq: number; at: number; what: string; errorType: string | null; message: string }
+  /** `memory: ended req-…, the newest of N streams`: stopped mid-reply, the client got an error naming --parallel. */
+  | { kind: 'ended'; seq: number; at: number; reqId: string; streams: number }
 
 export function rowFromLine(line: LogLine): RequestRow | null {
   const e = line.event
@@ -29,6 +31,10 @@ export function rowFromLine(line: LogLine): RequestRow | null {
       return e.what === 'request' || e.what === 'stream'
         ? { kind: 'error', seq: line.seq, at: line.at, what: e.what, errorType: e.errorType, message: e.message }
         : null
+    case 'notice':
+      return e.what === 'memory-ended'
+        ? { kind: 'ended', seq: line.seq, at: line.at, reqId: String(e.fields['reqId']), streams: Number(e.fields['streams']) }
+        : null
     default:
       return null
   }
@@ -41,6 +47,14 @@ export function prefillRate(e: DoneEvent): number | null {
   return fresh / e.prefillS
 }
 
+/**
+ * Whether a finished request was longer (prompt and reply) than the server keeps for a next turn (0.4.0+'s
+ * `requests up to N tokens keep their prompt` line): its conversation's next turn prefills again.
+ */
+export function overKept(e: DoneEvent, keptTokens: number | null | undefined): boolean {
+  return keptTokens !== null && keptTokens !== undefined && e.prompt + e.tokens > keptTokens
+}
+
 export function acceptanceRatio(e: DoneEvent): number | null {
   return e.accepted.proposed > 0 ? e.accepted.accepted / e.accepted.proposed : null
 }
@@ -48,7 +62,10 @@ export function acceptanceRatio(e: DoneEvent): number | null {
 export interface RequestTotals {
   requests: number
   refused: number
+  /** Errors of every kind, the requests memory pressure ended included. */
   failed: number
+  /** Of `failed`: the requests memory pressure ended. */
+  ended: number
   tokensIn: number
   cachedIn: number
   tokensOut: number
@@ -69,6 +86,7 @@ export function summarize(rows: readonly RequestRow[]): RequestTotals {
   let requests = 0
   let refused = 0
   let failed = 0
+  let ended = 0
   let tokensIn = 0
   let cachedIn = 0
   let tokensOut = 0
@@ -88,6 +106,7 @@ export function summarize(rows: readonly RequestRow[]): RequestTotals {
     }
     if (row.kind !== 'done') {
       failed++
+      if (row.kind === 'ended') ended++
       continue
     }
     const e = row.event
@@ -113,6 +132,7 @@ export function summarize(rows: readonly RequestRow[]): RequestTotals {
     requests,
     refused,
     failed,
+    ended,
     tokensIn,
     cachedIn,
     tokensOut,

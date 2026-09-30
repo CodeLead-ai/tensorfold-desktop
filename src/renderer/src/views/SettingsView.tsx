@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { AuditEntry, LogsInfo } from '@shared/api'
 import type { Theme } from '@shared/settings'
+import { CopyButton } from '../components/CopyButton'
 import { Field, NumberInput, Segmented } from '../components/Fields'
 import { Icon } from '../components/Icon'
 import { bytes, clock } from '../lib/format'
@@ -62,6 +63,12 @@ export function SettingsView(): React.JSX.Element {
               <dd>{binary.source === 'settings' ? 'the path above' : binary.source === 'path' ? 'PATH' : binary.source === 'found' ? 'looking in the usual places' : binary.source === 'mock' ? 'the mock profile (npm run dev:mock)' : '–'}</dd>
               <dt>Version</dt>
               <dd className={binary.version ? '' : 'bad'}>{binary.version ?? binary.error ?? '–'}</dd>
+              {binary.version && (
+                <>
+                  <dt>Serve flags</dt>
+                  <dd className={binary.serveHelp ? '' : 'muted'}>{binary.serveHelp ? `${binary.serveHelp.length}, from its serve --help` : 'serve --help did not answer: the form offers every flag the app knows'}</dd>
+                </>
+              )}
               {!binary.path && (
                 <>
                   <dt>Looked in</dt>
@@ -72,6 +79,7 @@ export function SettingsView(): React.JSX.Element {
               )}
             </dl>
           )}
+          {binary?.path && binary.version && <UpdateLine />}
         </div>
       </section>
 
@@ -240,6 +248,50 @@ function AuditCard(): React.JSX.Element {
         )}
       </div>
     </section>
+  )
+}
+
+/**
+ * `tensorfold update --check`, when asked: the CLI asks GitHub for the newest release. The app never installs it:
+ * the command to do that is shown, since an upgrade changes the environment a bench runs in.
+ */
+function UpdateLine(): React.JSX.Element {
+  const check = useDesk((s) => s.updateCheck)
+  const checking = useDesk((s) => s.checkingUpdate)
+  const { checkUpdate } = useDesk.getState()
+  return (
+    <div className="grid" style={{ gap: 8 }}>
+      <div className="row wrap" style={{ gap: 10 }}>
+        <button className="btn" disabled={checking} onClick={() => void checkUpdate()} title="Runs tensorfold update --check: the CLI asks api.github.com for the newest release. Nothing is installed.">
+          <Icon name="restart" size={13} /> {checking ? 'Asking GitHub…' : 'Check for a newer release'}
+        </button>
+        {check && !checking && (
+          <span className={check.ok ? (check.newer ? 'warn' : 'ok') : 'bad'}>
+            {check.ok ? (check.newer ? `TensorFold ${check.latest} is out (this is ${check.current})` : `${check.current} is the latest release`) : `No answer: ${check.error}`}
+            <span className="faint"> · {clock(check.at)}</span>
+          </span>
+        )}
+      </div>
+      {check?.newer && (
+        <div className="grid" style={{ gap: 6 }}>
+          <span className="field-help">
+            To install it, stop the server and run the command below: it upgrades TensorFold with pip in this binary's environment. If a benchmark runs from this environment, upgrade between runs.
+          </span>
+          <div className="row" style={{ gap: 8 }}>
+            <pre className="command selectable grow" style={{ margin: 0 }}>
+              {check.command}
+            </pre>
+            <CopyButton text={check.command} />
+          </div>
+          {check.notesUrl && (
+            <div className="row" style={{ gap: 8 }}>
+              <span className="field-help mono selectable">release notes: {check.notesUrl}</span>
+              <CopyButton text={check.notesUrl} label="Copy link" />
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   )
 }
 

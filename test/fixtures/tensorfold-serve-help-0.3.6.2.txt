@@ -1,0 +1,136 @@
+usage: tensorfold serve [-h] [--host HOST] [--port PORT] [--name NAME]
+                        [--alias ALIAS] [--context CONTEXT]
+                        [--max-tokens MAX_TOKENS] [--temperature TEMPERATURE]
+                        [--top-p TOP_P] [--top-k TOP_K]
+                        [--thinking | --no-thinking]
+                        [--reasoning-effort {low,medium,xhigh}]
+                        [--thinking-budget THINKING_BUDGET] [--no-drafts]
+                        [--drafter DRAFTER] [--drafter-bits DRAFTER_BITS]
+                        [--mtp-drafts MTP_DRAFTS]
+                        [--mtp-confidence MTP_CONFIDENCE]
+                        [--lane-kernels {auto,on,off}]
+                        [--prompt-cache-gib PROMPT_CACHE_GIB]
+                        [--checkpoint-slots CHECKPOINT_SLOTS]
+                        [--spill-gib SPILL_GIB] [--snapshot-dir SNAPSHOT_DIR]
+                        [--max-snapshots MAX_SNAPSHOTS] [--parallel PARALLEL]
+                        [--mlx-cache-gib MLX_CACHE_GIB] [--ssd-experts GIB]
+                        [--ple-on-ssd] [--no-update-check]
+                        [--backend {auto,mlx,cuda}] [--tp {1,2}]
+                        [--rank {0,1}] [--master MASTER]
+                        [--master-port MASTER_PORT]
+                        [--kv-dtype {bf16,int8,int4}]
+                        model
+
+positional arguments:
+  model                 a Hugging Face repo id (downloaded on first use) or a
+                        model directory
+
+options:
+  -h, --help            show this help message and exit
+
+endpoint:
+  --host HOST           address to listen on (0.0.0.0: every interface)
+                        (default: 127.0.0.1)
+  --port PORT
+  --name NAME           model id clients ask for (default: the model's name)
+                        (default: )
+  --alias ALIAS         another model id to answer to (default: [])
+
+generation (requests can override each of these):
+  --context CONTEXT     prompt plus reply window (default: model config; CUDA
+                        default/0: affordable native capacity; Metal 0: remove
+                        metadata cap) (default: None)
+  --max-tokens MAX_TOKENS
+                        reply tokens when a request does not say (default:
+                        4096)
+  --temperature TEMPERATURE
+                        0 decodes greedily (default: the model's
+                        generation_config.json, else 0) (default: None)
+  --top-p TOP_P         (default: the model's generation config) (default:
+                        None)
+  --top-k TOP_K         (default: the model's generation config) (default:
+                        None)
+  --thinking, --no-thinking
+                        open a think block when the chat template supports it
+                        (default: True)
+  --reasoning-effort {low,medium,xhigh}
+                        for chat templates that take one (Qwen3.8); medium
+                        adds no system-prompt text (default: medium)
+  --thinking-budget THINKING_BUDGET
+                        most thinking tokens before the server closes the
+                        think block (0: no limit) (default: 0)
+
+drafting and caches:
+  --no-drafts           one token a round: the serial reference (same output,
+                        slower) (default: False)
+  --drafter DRAFTER     a draft model (repo id or directory); auto: the
+                        family's draft model when it has been pulled; none: no
+                        draft model (default: auto)
+  --drafter-bits DRAFTER_BITS
+                        quantize the draft model's linears (0: bf16) (default:
+                        4)
+  --mtp-drafts MTP_DRAFTS
+                        most MTP drafts a round (Qwen3.8 Flash Next: 3 on Mac;
+                        on CUDA 6, stopping under 30% confidence); 0: no MTP
+                        drafts (any family) (default: None)
+  --mtp-confidence MTP_CONFIDENCE
+                        on CUDA, stop an MTP chain before a later draft under
+                        this probability (Flash Next default 0.30) (default:
+                        None)
+  --lane-kernels {auto,on,off}
+                        lane kernels for Qwen3.8 dense (auto: on GPUs with
+                        tensor units) (default: auto)
+  --prompt-cache-gib PROMPT_CACHE_GIB
+                        memory for cached conversation prefixes (0: off;
+                        default: an eighth of RAM, at most 16) (default: None)
+  --checkpoint-slots CHECKPOINT_SLOTS
+                        cached conversation prefixes kept in memory (default:
+                        3 per parallel lane, at least 8); with long
+                        conversations this, not --prompt-cache-gib, is usually
+                        the limit (default: None)
+  --spill-gib SPILL_GIB
+                        write evicted conversation prefixes to disk, up to
+                        this many GiB, and read them back on demand instead of
+                        prefilling again (0: off; needs --snapshot-dir)
+                        (default: 0.0)
+  --snapshot-dir SNAPSHOT_DIR
+                        where system-block and conversation snapshots are kept
+                        ('none': in memory only) (default:
+                        /Users/peter/.cache/tensorfold/prefix-snapshots)
+  --max-snapshots MAX_SNAPSHOTS
+                        system-block snapshots loaded at start (default: 3)
+  --parallel PARALLEL   requests decoded together, their windows sharing each
+                        round's forward: a number, or auto (Mac: up to 8, each
+                        started only while the projected memory fits the
+                        budget; CUDA: one at a time, the others waiting their
+                        turn) (default: auto)
+  --mlx-cache-gib MLX_CACHE_GIB
+                        MLX's cache of freed buffers (default: 8.0)
+  --ssd-experts GIB     stream routed experts from the checkpoint into a GPU
+                        pool of this many GiB, for models past the memory
+                        budget (the rest stays resident; output is the
+                        resident model's) (default: None)
+  --ple-on-ssd          Flash Next: read the n-gram (PLE) tables from the
+                        checkpoint on SSD at each lookup instead of holding
+                        them in memory. A trade: a few percent of decode speed
+                        for about 40 GiB less at peak (the tables are 29.8
+                        GiB); a 128 GB Mac needs it (default: False)
+  --no-update-check     don't ask GitHub whether a newer release exists (also
+                        TENSORFOLD_NO_UPDATE_CHECK=1) (default: False)
+
+NVIDIA GPUs (DGX Spark):
+  --backend {auto,mlx,cuda}
+                        auto: MLX on macOS, CUDA elsewhere (default: auto)
+  --tp {1,2}            GPUs (one per machine) the model is split over; run
+                        the same command on each (default: 1)
+  --rank {0,1}          with --tp 2: this machine's rank; rank 0 serves HTTP,
+                        rank 1 follows it (default: 0)
+  --master MASTER       with --tp 2: rank 0's address on the link between the
+                        machines (default: )
+  --master-port MASTER_PORT
+                        with --tp 2: rank 0's rendezvous port (default: 29551)
+  --kv-dtype {bf16,int8,int4}
+                        KV cache: bf16 (the default), int8, or int4. Quantized
+                        keys and values use one fp16 scale per 32 values
+                        (changes the output; Flash Next on CUDA only)
+                        (default: bf16)

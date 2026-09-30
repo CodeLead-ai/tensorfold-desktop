@@ -1,8 +1,9 @@
 /**
  * The `tensorfold serve` configuration (SPEC §2.1), grouped as `tensorfold serve --help` groups it
- * (read from the installed 0.3.6.2). A flag left undefined is not passed, so TensorFold applies its own
- * default. A flag set to a value is passed even when the value equals the default: the endorsed preset
- * passes `--port 8080` and `--reasoning-effort medium`, both of which are defaults.
+ * (read from 0.5.0; `since` marks the flags 0.3.6.2 lacks). A flag left undefined is not passed, so TensorFold
+ * applies its own default. A flag set to a value is passed even when the value equals the default: the
+ * endorsed preset passes `--port 8080`, a default. The installed binary's own `serve --help` (src/shared/
+ * serveHelp.ts) says which of these it has, and lists the flags of a newer TensorFold that this table lacks.
  */
 
 export type ReasoningEffort = 'low' | 'medium' | 'xhigh'
@@ -20,6 +21,10 @@ export interface EndpointFlags {
   name?: string
   /** --alias, repeatable: more model ids to answer to */
   alias?: string[]
+  /** --vision: image input for Qwen3.5/3.8 dense vision checkpoints (0.3.6.3) */
+  vision?: boolean
+  /** --vision-urls: with --vision, public HTTP(S) image URLs too (default: data URLs only) (0.3.6.3) */
+  visionUrls?: boolean
 }
 
 /** generation (requests can override each of these) */
@@ -34,9 +39,11 @@ export interface GenerationFlags {
   topP?: number
   /** --top-k (default: the model's generation config) */
   topK?: number
+  /** --min-p (default: the model's generation config, else 0: off) (0.5.0) */
+  minP?: number
   /** --thinking / --no-thinking (default: thinking) */
   thinking?: boolean
-  /** --reasoning-effort (default medium) */
+  /** --reasoning-effort (default: the chat template's own, xhigh for Qwen3.8; medium before 0.5.0) */
   reasoningEffort?: ReasoningEffort
   /** --thinking-budget: most thinking tokens (default 0: no limit) */
   thinkingBudget?: number
@@ -68,6 +75,8 @@ export interface DraftingFlags {
   maxSnapshots?: number
   /** --parallel: a number or auto (default auto: up to 8 on a Mac) */
   parallel?: number | 'auto'
+  /** --decode-share: while a prompt prefills, running replies keep this share of each chunk's time (default 0.25) (0.3.6.3) */
+  decodeShare?: number
   /** --mlx-cache-gib (default 8) */
   mlxCacheGib?: number
   /** --ssd-experts GIB: stream routed experts into a GPU pool of this many GiB */
@@ -100,6 +109,12 @@ export interface ServeEnv {
   memoryLimitGb?: number
 }
 
+/**
+ * Flags this app does not know that the installed TensorFold's `serve --help` lists (a newer release's), by
+ * switch: the value is passed as typed, or `true` for a switch that takes none.
+ */
+export type ExtraFlags = Record<string, string | true>
+
 export interface ServeConfig {
   /** A Hugging Face repo id or a model directory (LM Studio's MLX checkpoints work as directories). */
   model: string
@@ -108,6 +123,8 @@ export interface ServeConfig {
   drafting: DraftingFlags
   nvidia: NvidiaFlags
   env: ServeEnv
+  /** Passed after the flags above. Absent in configurations saved before it existed. */
+  extra?: ExtraFlags
 }
 
 export interface FlagGroups {
@@ -145,6 +162,8 @@ interface FlagSpecOf<G extends GroupId, K extends keyof FlagGroups[G]> {
   choices?: readonly string[]
   /** CUDA-only, or otherwise of no effect on a Mac. */
   macNoEffect?: boolean
+  /** The TensorFold release that added the flag, when it is newer than 0.3.6.2. */
+  since?: string
 }
 
 export type FlagSpec = {
@@ -157,13 +176,16 @@ export const FLAGS: readonly FlagSpec[] = [
   { group: 'endpoint', key: 'port', cli: '--port', kind: 'int', defaultText: '8080', help: 'port to listen on' },
   { group: 'endpoint', key: 'name', cli: '--name', kind: 'string', defaultText: "the model's name", help: 'model id clients ask for' },
   { group: 'endpoint', key: 'alias', cli: '--alias', kind: 'list', defaultText: 'none', help: 'more model ids to answer to (one per line)' },
+  { group: 'endpoint', key: 'vision', cli: '--vision', kind: 'bool', defaultText: 'off', help: "image input for Qwen3.5/3.8 dense vision checkpoints (needs pip install 'tensorfold[vision]')", since: '0.3.6.3' },
+  { group: 'endpoint', key: 'visionUrls', cli: '--vision-urls', kind: 'bool', defaultText: 'data URLs only', help: 'with --vision, accept public HTTP(S) image URLs too', since: '0.3.6.3' },
   { group: 'generation', key: 'context', cli: '--context', kind: 'int', defaultText: 'model config', help: 'prompt plus reply window, in tokens' },
   { group: 'generation', key: 'maxTokens', cli: '--max-tokens', kind: 'int', defaultText: '4096', help: 'reply tokens when a request does not say' },
   { group: 'generation', key: 'temperature', cli: '--temperature', kind: 'float', defaultText: 'generation_config.json, else 0', help: '0 decodes greedily' },
   { group: 'generation', key: 'topP', cli: '--top-p', kind: 'float', defaultText: 'generation config', help: 'nucleus sampling' },
   { group: 'generation', key: 'topK', cli: '--top-k', kind: 'int', defaultText: 'generation config', help: 'top-k sampling' },
+  { group: 'generation', key: 'minP', cli: '--min-p', kind: 'float', defaultText: 'generation config, else 0 (off)', help: "keep tokens at least this share of the likeliest one's probability", since: '0.5.0' },
   { group: 'generation', key: 'thinking', cli: '--thinking', kind: 'tristate', defaultText: 'on', help: 'open a think block when the chat template supports it' },
-  { group: 'generation', key: 'reasoningEffort', cli: '--reasoning-effort', kind: 'choice', choices: ['low', 'medium', 'xhigh'], defaultText: 'medium', help: 'for chat templates that take one (Qwen3.8); medium adds no system-prompt text' },
+  { group: 'generation', key: 'reasoningEffort', cli: '--reasoning-effort', kind: 'choice', choices: ['low', 'medium', 'xhigh'], defaultText: "the template's own (Qwen3.8: xhigh)", help: 'for chat templates that take one (Qwen3.8); medium adds no system-prompt text. Before 0.5.0 the default was medium' },
   { group: 'generation', key: 'thinkingBudget', cli: '--thinking-budget', kind: 'int', defaultText: '0 (no limit)', help: 'most thinking tokens before the server closes the think block' },
   { group: 'drafting', key: 'noDrafts', cli: '--no-drafts', kind: 'bool', defaultText: 'drafts on', help: 'one token a round: the serial reference (same output, slower)' },
   { group: 'drafting', key: 'drafter', cli: '--drafter', kind: 'string', defaultText: 'auto', help: "auto: the family's draft model when pulled; none; or a repo id or directory" },
@@ -177,6 +199,7 @@ export const FLAGS: readonly FlagSpec[] = [
   { group: 'drafting', key: 'snapshotDir', cli: '--snapshot-dir', kind: 'string', defaultText: '~/.cache/tensorfold/prefix-snapshots', help: "where system-block and conversation snapshots are kept ('none': in memory only)" },
   { group: 'drafting', key: 'maxSnapshots', cli: '--max-snapshots', kind: 'int', defaultText: '3', help: 'system-block snapshots loaded at start' },
   { group: 'drafting', key: 'parallel', cli: '--parallel', kind: 'intOrAuto', defaultText: 'auto', help: 'requests decoded together (Mac: up to 8 as memory allows)' },
+  { group: 'drafting', key: 'decodeShare', cli: '--decode-share', kind: 'float', defaultText: '0.25', help: "while a prompt prefills, running replies keep this share of each chunk's time (0: whole prompts first, as 0.3.6.2)", since: '0.3.6.3' },
   { group: 'drafting', key: 'mlxCacheGib', cli: '--mlx-cache-gib', kind: 'float', defaultText: '8', help: "MLX's cache of freed buffers" },
   { group: 'drafting', key: 'ssdExperts', cli: '--ssd-experts', kind: 'float', defaultText: 'off', help: 'stream routed experts into a GPU pool of this many GiB' },
   { group: 'drafting', key: 'pleOnSsd', cli: '--ple-on-ssd', kind: 'bool', defaultText: 'off', help: "Flash Next: read the n-gram tables from SSD (about 40 GiB less at peak)" },
@@ -216,10 +239,17 @@ export function renderFlag(spec: FlagSpec, value: unknown): string[] {
   }
 }
 
-/** `serve <model> [flags]`, flags in `serve --help` order. */
+/** The argv items for a flag this app does not know; empty when it is not passed. */
+export function renderExtra(cli: string, value: string | boolean | undefined): string[] {
+  if (value === true) return [cli]
+  return typeof value === 'string' && value !== '' ? [cli, value] : []
+}
+
+/** `serve <model> [flags]`, flags in `serve --help` order, then the ones this app does not know. */
 export function buildServeArgv(config: ServeConfig): string[] {
   const argv = ['serve', config.model]
   for (const spec of FLAGS) argv.push(...renderFlag(spec, flagValue(config, spec)))
+  for (const [cli, value] of Object.entries(config.extra ?? {})) argv.push(...renderExtra(cli, value))
   return argv
 }
 
@@ -253,10 +283,20 @@ function parseNumber(spec: FlagSpec, text: string, integer: boolean): number {
   return value
 }
 
-/** The inverse of buildServeArgv, for exported snapshots and pasted command lines. */
-export function parseServeArgv(argv: readonly string[]): ServeConfig {
+/** A flag of the installed binary's `serve --help` that this app does not know. */
+export interface OtherFlag {
+  cli: string
+  takesValue: boolean
+}
+
+/**
+ * The inverse of buildServeArgv, for exported snapshots and pasted command lines. A flag this app does not
+ * know is kept in `extra` when `others` (the installed binary's) lists it, and refused otherwise.
+ */
+export function parseServeArgv(argv: readonly string[], others: readonly OtherFlag[] = []): ServeConfig {
   const rest = argv[0] === 'serve' ? argv.slice(1) : argv.slice()
   const config = emptyConfig()
+  const extra: ExtraFlags = {}
   const bySwitch = new Map<string, FlagSpec>()
   for (const spec of FLAGS) {
     bySwitch.set(spec.cli, spec)
@@ -272,7 +312,17 @@ export function parseServeArgv(argv: readonly string[]): ServeConfig {
     }
     const [name, inline] = word.includes('=') ? [word.slice(0, word.indexOf('=')), word.slice(word.indexOf('=') + 1)] : [word, undefined]
     const spec = bySwitch.get(name)
-    if (!spec) throw new ArgvError(`unknown flag ${name}`)
+    if (!spec) {
+      const other = others.find((o) => o.cli === name)
+      if (!other) throw new ArgvError(`unknown flag ${name}`)
+      if (!other.takesValue) extra[name] = true
+      else {
+        const text = inline ?? rest[++i]
+        if (text === undefined) throw new ArgvError(`${name} needs a value`)
+        extra[name] = text
+      }
+      continue
+    }
     const group = config[spec.group] as Record<string, unknown>
     if (spec.kind === 'bool') {
       group[spec.key] = true
@@ -309,6 +359,7 @@ export function parseServeArgv(argv: readonly string[]): ServeConfig {
   }
   if (model === undefined) throw new ArgvError('no model given')
   config.model = model
+  if (Object.keys(extra).length > 0) config.extra = extra
   return config
 }
 
@@ -348,7 +399,7 @@ function cloneGroups(flags: FlagGroups): FlagGroups {
   return JSON.parse(JSON.stringify(flags)) as FlagGroups
 }
 
-/** A preset's flags on the given model; the environment is the machine's, so it is kept. */
+/** A preset's flags on the given model (and no others); the environment is the machine's, so it is kept. */
 export function applyPreset(config: ServeConfig, id: Preset['id']): ServeConfig {
   const preset = PRESETS.find((p) => p.id === id)
   if (!preset) throw new Error(`no preset ${id}`)

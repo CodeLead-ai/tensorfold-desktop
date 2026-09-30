@@ -35,6 +35,25 @@ describe('validateConfig', () => {
     )
   })
 
+  it("checks 0.5.0's flags: min-p is a probability, decode-share is 0 or more, --vision-urls needs --vision", () => {
+    expect(fields({ ...emptyConfig(MODEL), generation: { minP: 1.5 } })).toEqual(['generation.minP'])
+    expect(fields({ ...emptyConfig(MODEL), generation: { minP: 0 } })).toEqual([])
+    expect(fields({ ...emptyConfig(MODEL), drafting: { decodeShare: -0.1 } })).toEqual(['drafting.decodeShare'])
+    expect(fields({ ...emptyConfig(MODEL), drafting: { decodeShare: 0 } })).toEqual([])
+    expect(fields({ ...emptyConfig(MODEL), endpoint: { visionUrls: true } })).toEqual(['endpoint.visionUrls'])
+    expect(fields({ ...emptyConfig(MODEL), endpoint: { vision: true, visionUrls: true } })).toEqual([])
+  })
+
+  it("refuses a flag the installed binary's serve --help does not list, only when it is passed", () => {
+    const old = { version: '0.3.6.2', switches: new Set(['--port', '--context', '--vision-urls']) }
+    const config: ServeConfig = { ...emptyConfig(MODEL), generation: { context: 4096, minP: 0.1 }, endpoint: { vision: false }, extra: { '--turbo': true } }
+    expect(validateConfig(config, 'darwin', old).filter((i) => i.severity === 'error')).toEqual([
+      { field: 'generation.minP', message: 'tensorfold 0.3.6.2 has no --min-p (it came in 0.5.0)', severity: 'error' },
+      { field: 'extra.--turbo', message: 'tensorfold 0.3.6.2 has no --turbo', severity: 'error' }
+    ])
+    expect(validateConfig(config).filter((i) => i.severity === 'error')).toEqual([])
+  })
+
   it('needs a snapshot directory for spilling', () => {
     expect(fields({ ...emptyConfig(MODEL), drafting: { spillGib: 8, snapshotDir: 'none' } })).toEqual(['drafting.spillGib'])
   })

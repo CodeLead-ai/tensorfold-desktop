@@ -8,14 +8,17 @@ import {
   buildServeArgv,
   buildServeEnv,
   presetOf,
+  type ExtraFlags,
+  type FlagSpec,
   type GroupId,
   type ServeConfig
 } from '@shared/config'
+import { helpSwitches, unknownFlags, type HelpFlag } from '@shared/serveHelp'
 import type { SessionInfo } from '@shared/session'
 import { drafterName } from '@shared/session'
-import type { ValidationIssue } from '@shared/validate'
+import { notInBinary, type ValidationIssue } from '@shared/validate'
 import { CopyButton } from '../components/CopyButton'
-import { Field, FlagField, NumberInput, Segmented } from '../components/Fields'
+import { ExtraField, Field, FlagField, NumberInput, Segmented } from '../components/Fields'
 import { Icon } from '../components/Icon'
 import { MemoryGauge } from '../components/MemoryGauge'
 import { bytes, clock, duration, fixed, int } from '../lib/format'
@@ -49,12 +52,28 @@ function useIssues(): Record<string, ValidationIssue> {
   }, [issues])
 }
 
+/** The form's value for a flag the app's table lacks: the text, or `on` / `off` for a switch. */
+function extraValue(extra: ExtraFlags | undefined, flag: HelpFlag): string | 'on' | 'off' | undefined {
+  const value = extra?.[flag.cli]
+  if (value === true) return 'on'
+  if (flag.negative && extra?.[flag.negative] === true) return 'off'
+  return typeof value === 'string' ? value : undefined
+}
+
 function ConfigCard(): React.JSX.Element {
   const form = useDesk((s) => s.form)
   const setForm = useDesk((s) => s.setForm)
+  const binary = useDesk((s) => s.binary)
   const issues = useIssues()
-  const [open, setOpen] = useState<Record<string, boolean>>({ endpoint: true, generation: true, drafting: true, env: false, nvidia: false })
+  const [open, setOpen] = useState<Record<string, boolean>>({ endpoint: true, generation: true, drafting: true, env: false, nvidia: false, extra: true })
   const preset = presetOf(form)
+  const help = binary?.serveHelp ?? null
+  const switches = useMemo(() => (help ? helpSwitches(help) : null), [help])
+  const others = useMemo(() => (help ? unknownFlags(help) : []), [help])
+  // Extra flags set in the form that this binary does not list (it was downgraded, or the form came from elsewhere).
+  const strays = Object.keys(form.extra ?? {}).filter((cli) => !others.some((o) => o.cli === cli || o.negative === cli))
+  const missing = (spec: FlagSpec): string | undefined =>
+    switches && !switches.has(spec.cli) ? notInBinary(spec.cli, { version: binary?.version ?? null, switches }, spec.since) : undefined
 
   const setFlag = (group: GroupId, key: string, value: unknown): void => {
     const next: ServeConfig = { ...form, [group]: { ...form[group] } }
@@ -62,6 +81,17 @@ function ConfigCard(): React.JSX.Element {
     if (value === undefined) delete target[key]
     else target[key] = value
     setForm(next)
+  }
+
+  const setExtra = (flag: { cli: string; negative: string | null }, value: string | 'on' | 'off' | undefined): void => {
+    const extra: ExtraFlags = { ...(form.extra ?? {}) }
+    delete extra[flag.cli]
+    if (flag.negative) delete extra[flag.negative]
+    if (value === 'on') extra[flag.cli] = true
+    else if (value === 'off' && flag.negative) extra[flag.negative] = true
+    else if (value !== undefined && value !== '') extra[flag.cli] = value
+    const { extra: _old, ...rest } = form
+    setForm(Object.keys(extra).length > 0 ? { ...rest, extra } : rest)
   }
 
   return (
@@ -105,10 +135,40 @@ function ConfigCard(): React.JSX.Element {
       {GROUPS.slice(0, 3).map((group) => (
         <Section key={group} id={group} title={GROUP_TITLES[group]} open={open[group] ?? false} onToggle={() => setOpen({ ...open, [group]: !open[group] })} count={Object.values(form[group]).filter((v) => v !== undefined).length}>
           {FLAGS.filter((f) => f.group === group).map((spec) => (
-            <FlagField key={spec.cli} spec={spec} value={(form[group] as Record<string, unknown>)[spec.key]} issue={issues[`${group}.${String(spec.key)}`]} onChange={(v) => setFlag(group, String(spec.key), v)} />
+            <FlagField
+              key={spec.cli}
+              spec={spec}
+              value={(form[group] as Record<string, unknown>)[spec.key]}
+              issue={issues[`${group}.${String(spec.key)}`]}
+              missing={missing(spec)}
+              onChange={(v) => setFlag(group, String(spec.key), v)}
+            />
           ))}
         </Section>
       ))}
+      {(others.length > 0 || strays.length > 0) && (
+        <Section
+          id="extra"
+          title="More flags"
+          note={`listed by tensorfold ${binary?.version ?? ''} and new to this app: passed as set`}
+          open={open['extra'] ?? true}
+          onToggle={() => setOpen({ ...open, extra: !open['extra'] })}
+          count={Object.keys(form.extra ?? {}).length}
+        >
+          {others.map((flag) => (
+            <ExtraField key={flag.cli} flag={flag} value={extraValue(form.extra, flag)} issue={issues[`extra.${flag.cli}`] ?? (flag.negative ? issues[`extra.${flag.negative}`] : undefined)} onChange={(v) => setExtra(flag, v)} />
+          ))}
+          {strays.map((cli) => (
+            <ExtraField
+              key={cli}
+              flag={{ cli, negative: null, metavar: form.extra?.[cli] === true ? null : 'VALUE', choices: null, help: 'set in this form, but not listed by the installed TensorFold', defaultText: null, group: '' }}
+              value={form.extra?.[cli] === true ? 'on' : (form.extra?.[cli] as string | undefined)}
+              issue={issues[`extra.${cli}`]}
+              onChange={(v) => setExtra({ cli, negative: null }, v)}
+            />
+          ))}
+        </Section>
+      )}
       <Section id="env" title="Environment" open={open['env'] ?? false} onToggle={() => setOpen({ ...open, env: !open['env'] })} count={form.env.memoryLimitGb === undefined ? 0 : 1}>
         <Field
           wide
@@ -127,7 +187,14 @@ function ConfigCard(): React.JSX.Element {
       </Section>
       <Section id="nvidia" title={GROUP_TITLES.nvidia} note="shown for reference; they do nothing on a Mac" open={open['nvidia'] ?? false} onToggle={() => setOpen({ ...open, nvidia: !open['nvidia'] })} count={Object.values(form.nvidia).filter((v) => v !== undefined).length}>
         {FLAGS.filter((f) => f.group === 'nvidia').map((spec) => (
-          <FlagField key={spec.cli} spec={spec} value={(form.nvidia as Record<string, unknown>)[spec.key]} issue={issues[`nvidia.${String(spec.key)}`]} onChange={(v) => setFlag('nvidia', String(spec.key), v)} />
+          <FlagField
+            key={spec.cli}
+            spec={spec}
+            value={(form.nvidia as Record<string, unknown>)[spec.key]}
+            issue={issues[`nvidia.${String(spec.key)}`]}
+            missing={missing(spec)}
+            onChange={(v) => setFlag('nvidia', String(spec.key), v)}
+          />
         ))}
       </Section>
     </section>
@@ -176,9 +243,11 @@ function CommandCard(): React.JSX.Element {
   const server = useDesk((s) => s.server)
   const busy = useDesk((s) => s.busy)
   const binary = useDesk((s) => s.binary)
-  const { start, stop, restart, kill, setView } = useDesk.getState()
+  const { start, stop, restart, kill, setView, dumpStacks } = useDesk.getState()
   const errors = issues.filter((i) => i.severity === 'error')
   const running = server.status === 'loading' || server.status === 'serving'
+  // TensorFold arms its stack dump just before the memory budget line; SIGUSR1 before then would end it.
+  const dumpable = server.status === 'serving' || (server.status === 'loading' && server.info.memoryBudget !== null)
   const differs =
     running && server.config !== null && JSON.stringify([buildServeArgv(form), buildServeEnv(form)]) !== JSON.stringify([server.argv, buildServeEnv(server.config)])
 
@@ -235,6 +304,16 @@ function CommandCard(): React.JSX.Element {
             </button>
           )}
           <span className="spacer grow" />
+          {running && (
+            <button
+              className="btn ghost small"
+              disabled={!dumpable}
+              onClick={() => void dumpStacks()}
+              title="SIGUSR1: TensorFold prints every thread's Python stack on stderr, in the Log view. For a server that seems stuck."
+            >
+              <Icon name="log" size={13} /> Dump stacks
+            </button>
+          )}
           {server.logFile && (
             <button className="btn ghost small" onClick={() => void window.tfdesk.reveal(server.logFile as string)} title={server.logFile}>
               <Icon name="folder" size={13} /> Log file
@@ -280,7 +359,12 @@ function steps(info: SessionInfo): Array<{ what: string; value: string }> {
     const c = info.concurrency
     out.push({ what: 'concurrency', value: `${c.lanes} lanes · ${c.budgetGb} GB for streams${c.fits ? ` · ${c.fits.streams} × ${int(c.fits.tokens)} tokens fit now` : ''}` })
   }
-  if (info.contextWindow) out.push({ what: 'context window', value: `${int(info.contextWindow.tokens)} tokens (fitted)` })
+  if (info.contextWindow) {
+    out.push({ what: 'context window', value: `${int(info.contextWindow.tokens)} tokens (fitted${info.contextWindow.keepsPrompt ? '; each request keeps its prompt for the next turn' : ''})` })
+  }
+  if (info.resumable) {
+    out.push({ what: 'prompts kept', value: `up to ${int(info.resumable.tokens)} tokens with the reply; a longer request's next turn prefills again` })
+  }
   if (info.serving) out.push({ what: 'serving', value: `${info.serving.url} · loaded in ${fixed(info.serving.loadedInS)} s` })
   for (const note of info.notes) out.push({ what: 'note', value: note })
   return out

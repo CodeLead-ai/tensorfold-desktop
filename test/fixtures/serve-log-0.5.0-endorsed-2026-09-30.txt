@@ -1,0 +1,14 @@
+[tensorfold] memory budget 44.8 GiB: MLX's buffers up to 41.8 GiB, 3 GiB for the rest of the process; TENSORFOLD_MEMORY_LIMIT_GB can raise it to 51.8
+[tensorfold] loading Qwen3.8-27B-MLX-8bit: Qwen3.8 dense (qwen3_5)
+[tensorfold] lane kernels on: 9 matmul shapes warmed, fused projections {'zba': 48, 'kv': 16, 'gu': 64}
+[tensorfold] drafter /Users/peter/.cache/huggingface/hub/models--z-lab--Qwen3.8-27B-DFlash2/snapshots/50307d4c4cde6860d4eee73e2547cd786fe8e8a4 block=8 bits=4
+[tensorfold] lane kernels: windows of up to 32 rows reproduce one-row steps here (ms by rows 1: 57.4, 2: 60.1, 4: 62.4, 8: 64.8, 16: 68.0, 17: 73.3, 32: 78.5, 64: 107.3, 128: 189.4)
+[tensorfold] 31.1 GiB of weights kept resident
+[tensorfold] prompt chunks of up to 2,048 tokens, cut at replies 256+ tokens apart
+[tensorfold] concurrency: up to 8 requests share each round; memory budget 38.0 GB (MLX's share 41.8 GB, or 70% of 64 GB less 6.8 GB in use elsewhere); a stream 166 MB at 64 tokens, 394 MB at 2,112, then 64.0 KB a token; a shared round up to 1.39 GB at 8 streams; 4 streams of 8,192 tokens fit now (more wait their turn)
+[tensorfold] warming 1 saved system block(s) for these kernels in the background: until it ends, a request first waits for one prompt chunk (GET /health reports warming)
+[tensorfold] requests up to 49,664 tokens keep their prompt for the next turn in the 44.8 GiB memory budget; a longer one is served, and its next turn prefills again
+[tensorfold] serving Qwen3.8-27B-MLX-8bit at http://127.0.0.1:8080/v1 (sampling: temperature 1.0, top_k 20, top_p 0.95; drafts: on; context: 89600; loaded in 34.8s)
+[tensorfold] 127.0.0.1 "GET /health HTTP/1.1" 200 -
+[tensorfold] saved system-block snapshot tokens=847 in 0.0s
+[tensorfold] warmed system block tokens=847 of 847 in 1.3s

@@ -37,7 +37,9 @@ const api: DeskApi = {
   exportSnapshot: () => ipcRenderer.invoke(CHANNELS.exportSnapshot),
   runnerLines: () => ipcRenderer.invoke(CHANNELS.runnerLines),
   networkAudit: () => ipcRenderer.invoke(CHANNELS.networkAudit),
-  logsInfo: () => ipcRenderer.invoke(CHANNELS.logsInfo)
+  logsInfo: () => ipcRenderer.invoke(CHANNELS.logsInfo),
+  checkUpdate: () => ipcRenderer.invoke(CHANNELS.checkUpdate),
+  dumpStacks: () => ipcRenderer.invoke(CHANNELS.dumpStacks)
 }
 
 contextBridge.exposeInMainWorld('tfdesk', api)

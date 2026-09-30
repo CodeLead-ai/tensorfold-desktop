@@ -26,20 +26,23 @@ Mac, Gatekeeper may refuse it the first time: right-click the app and choose Ope
 xattr -dr com.apple.quarantine "/Applications/TensorFold Desk.app"
 ```
 
-The app needs a `tensorfold` binary; 0.3.6.2 is the one it was built against. It finds it by itself: first on your
-login shell's `PATH`, then in any virtualenv folder under `~/Projects/*/` or `~` that holds one (for example
-`~/Projects/codelead-bench/tensorfold-venv/bin/tensorfold`). You can also point to one in Settings.
+The app needs a `tensorfold` binary. It was built against 0.3.6.2 and follows 0.5.0, installed on this Mac since
+2026-09-30. It finds the binary by itself: first on your login shell's `PATH`, then in any virtualenv folder under
+`~/Projects/*/` or `~` that holds one (for example `~/Projects/codelead-bench/tensorfold-venv/bin/tensorfold`). You
+can also point to one in Settings. The app reads that binary's own `serve --help`, so the form matches its version.
+A flag an older TensorFold lacks is marked, and a newer TensorFold's flags that the app doesn't know yet get plain
+fields.
 
 ## What it does
 
 | View | |
 | --- | --- |
-| **Server** | The `tensorfold serve` flags as a form, grouped as the CLI groups them, with presets ("CodeLead endorsed", "Serial reference"). The fields are validated: a model folder must have a `config.json`, the port must be free (the app names a TensorFold server that already holds it), and the context must be a positive integer. The exact command line is shown and can be copied. Start, Stop (SIGTERM, then SIGKILL after the grace period), Restart. The startup lines stream in as they arrive. A memory gauge follows `/health` every 2 s. When the server dies, the view shows the exit code and its last 50 lines. While LM Studio is running, an LM Studio card offers "Unload LM Studio, then serve" and "Stop, then restore". When it isn't running, nothing about it is shown. The serving-snapshot card exports JSON and copies the lines for a runner. |
-| **Requests** | Every `done` line as a row: prompt, cached, effort, thinking, reply tokens, finish, tok/s, ttft, prefill, prefill tok/s, accepted drafts, ms/round, prefix-cache hits/misses/evictions, sha. Refusals are highlighted rows, with their message and the reply tokens the client asked for. A live tok/s sparkline, and the session's totals. |
+| **Server** | The `tensorfold serve` flags as a form, grouped as the CLI groups them, with presets ("CodeLead endorsed", "Serial reference"). The fields are validated: a model folder must have a `config.json`, the port must be free (the app names a TensorFold server that already holds it), and the context must be a positive integer. The exact command line is shown and can be copied. Start, Stop (SIGTERM, then SIGKILL after the grace period), Restart. The startup lines stream in as they arrive. "Dump stacks" sends SIGUSR1, and TensorFold prints every thread's Python stack into the Log view (for a server that seems stuck). A memory gauge follows `/health` every 2 s. When the server dies, the view shows the exit code and its last 50 lines. While LM Studio is running, an LM Studio card offers "Unload LM Studio, then serve" and "Stop, then restore". When it isn't running, nothing about it is shown. The serving-snapshot card exports JSON and copies the lines for a runner. |
+| **Requests** | Every `done` line as a row: prompt, cached, effort, thinking, reply tokens, finish, tok/s, ttft, prefill, prefill tok/s, accepted drafts, ms/round, prefix-cache hits/misses/evictions, sha. Refusals are highlighted rows, with their message and the reply tokens the client asked for. From TensorFold 0.4.0, a request that memory pressure ended is a row too, and a request too long for its prompt to be kept for the next turn is marked (the header shows the limit, "prompts kept ≤ N", and the streams waiting for memory). A live tok/s sparkline, and the session's totals. |
 | **Checkpoints** | Scans the LM Studio models folder, the Hugging Face cache, and any folder you add. Each servable checkpoint gets a card built from `tensorfold info`: family, whether it is tested, quantization, max context, size on disk, and whether its drafter is pulled. "Serve this" fills the form. It can pull from Hugging Face, and the tested families' drafters are one click away. |
 | **Probe** | Sends one chat completion and measures ttft and tok/s, shown beside the server's own `done` line for the same request. It also runs the saved alternation set: the prompt alone, then after a big generation, then again. |
 | **Log** | The raw stream from stdout and stderr, plus the app's own notes. Follow mode, filter, copy. The app's own `/health` polls are hidden unless you show them. |
-| **Settings** | The binary; checkpoint folders; LM Studio's `lms` and the unload and restore commands; the stop grace period; the `/health` interval; the theme; and a network audit of the window. |
+| **Settings** | The binary, its version and the flags its `serve --help` lists, and a check for a newer release (`tensorfold update --check`; the app shows the command that installs it and installs nothing); checkpoint folders; LM Studio's `lms` and the unload and restore commands; the stop grace period; the `/health` interval; the theme; and a network audit of the window. |
 
 The app watches the servers it starts. A server started elsewhere, such as by a bench runner script, shows up
 only as the port being in use; the app names the model it serves.
@@ -88,7 +91,7 @@ npm run dev:mock
 
 ### The mock
 
-`mock/fake-tensorfold.mjs` stands in for the `tensorfold` CLI (0.3.6.2) with no dependencies. The UI can be
+`mock/fake-tensorfold.mjs` stands in for the `tensorfold` CLI (0.5.0, or 0.3.6.2) with no dependencies. The UI can be
 built and tested on any Mac without a 27B model.
 
 - `serve` prints the real startup lines from the fixtures and answers `GET /v1/models` and `GET /health`, whose
@@ -96,7 +99,11 @@ built and tested on any Mac without a 27B model.
   Meanwhile it replays the requests of the 2026-09-29 K3 run, sped up. It refuses what TensorFold refuses: HTTP 400
   for the context window, and `start failed` for memory. SIGTERM kills it at once while it loads; once serving,
   it shuts down and exits 0, as TensorFold does.
-- `info`, `models` and `pull` print the real formats (`info` matches the real output byte for byte).
+- `info`, `models` and `pull` print the real formats (`info` matches the real output byte for byte). `serve --help`
+  prints the version's real help, and flags it does not list are refused as argparse refuses them. `update --check`
+  answers as `update.py` does, asking no one. SIGUSR1 prints a stack dump on stderr once the memory budget line is out.
+- As 0.5.0 it prints the recorded 0.3.6.2 startup lines with the changes 0.5.0's source makes to them (the round's
+  streams, the kept-prompt line).
 - `mock/fake-lms.mjs` stands in for LM Studio's `lms` (`ps --json`, `unload`, `load`). It keeps its state in `.tmp/`.
 - `mock/models/` and `mock/hf-cache/` hold checkpoint folders to scan.
 
@@ -109,6 +116,9 @@ Environment knobs:
 | `MOCK_TENSORFOLD_INTERVAL_MS` | 1500 | Pause between replayed requests; 0 turns the replay off |
 | `MOCK_TENSORFOLD_TOKENS_PER_S` | 60 | Decode speed for real chat requests |
 | `MOCK_TENSORFOLD_FAIL` | | `startup`, `crash`, `slow-stop` or `ignore-sigterm` |
+| `MOCK_TENSORFOLD_VERSION` | 0.5.0 | `0.3.6.2` plays the older version: its help, its lines |
+| `MOCK_TENSORFOLD_LATEST` | this version | What `update --check` finds: a version, or `offline` |
+| `MOCK_TENSORFOLD_MEMORY` | | `pressure`: the replay's streams wait for memory, and one ends (0.4.0+'s lines) |
 
 The icon joins the two brands. TensorFold's folded sheet, a mesh with lit nodes, twists once, from its coral and
 violet into CodeLead's blue and cyan. It sits on CodeLead's dark navy tile, over the glowing cursor of CodeLead's
@@ -126,7 +136,9 @@ Electron 44 with electron-vite, React 18, TypeScript strict, zustand and electro
 - `src/preload/`: the typed `window.tfdesk` API. The window runs with `contextIsolation`, `sandbox`, and no
   Node integration.
 - `src/renderer/`: the six views. The window makes no network requests: its Content-Security-Policy has
-  `connect-src 'none'`, and the main process blocks and records anything but its own files.
+  `connect-src 'none'`, and the main process blocks and records anything but its own files. Only two things reach
+  the internet, both started by the user and both made by the `tensorfold` CLI, not the app: a pull
+  (huggingface.co) and the update check (api.github.com).
 
 The server is started with `PYTHONUNBUFFERED=1`. TensorFold prints its access lines without flushing, so without
 it they would arrive late.
@@ -135,10 +147,10 @@ it they would arrive late.
 
 | | | |
 | --- | --- | --- |
-| 1 | The endorsed preset serves and stops with its exit code (real server) | passes (`npm run test:real`) |
-| 2 | Every Appendix A line parses with its exact values | passes (`npm test`), plus all 145 lines of a real serve log |
+| 1 | The endorsed preset serves and stops with its exit code (real server) | passes on 0.3.6.2 and 0.5.0 (`npm run test:real`) |
+| 2 | Every Appendix A line parses with its exact values | passes (`npm test`), plus all 145 lines of a real 0.3.6.2 serve log and every stdout line of two real 0.5.0 sessions |
 | 3 | Requests appear within a second; sparkline, totals, highlighted refusals | passes: real server and mock |
-| 4 | The memory gauge moves during a long prefill | passes: 31.3 → 37.4 GiB during a 36,743-token prefill |
+| 4 | The memory gauge moves during a long prefill | passes: during a 36,743-token prefill, 31.3 → 37.4 GiB on 0.3.6.2, 31.1 → 36.4 GiB on 0.5.0 |
 | 5 | "Unload LM Studio, then serve"; a clear message without `lms` | passes: the real LM Studio (unload, serve, stop, restore with the bench's reload script) and a fake `lms` |
 | 6 | The exported snapshot reproduces the command line | passes: real server and tests |
 | 7 | typecheck, test, build; dev:mock; the dmg opens on arm64 | passes |

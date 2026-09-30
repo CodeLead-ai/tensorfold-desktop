@@ -1,6 +1,8 @@
 /**
  * One line of `tensorfold serve` output in, one event out (SPEC §4). Pure: no state, no I/O, never throws.
  * Anything it does not recognize is `{ kind: 'unknown' }`, so a newer TensorFold degrades to raw lines.
+ * Most lines start `[tensorfold] `; the lane engine and some families print under their own tag (`[lanes] `,
+ * `[glm5] `, `[gemma4] `, `[nemotron] `, `[deepseek_v4] `).
  */
 import type {
   ConcurrencyStartup,
@@ -41,7 +43,39 @@ export function parseLine(raw: string): LogEvent {
   }
   const fatal = /^tensorfold: (.*)$/.exec(line)
   if (fatal) return { kind: 'error', what: 'fatal', errorType: null, message: fatal[1] as string }
+  const tagged = /^\[([a-z][a-z0-9_]*)\] (.*)$/s.exec(line)
+  if (tagged) {
+    try {
+      return parseTagged(tagged[1] as string, tagged[2] as string) ?? unknown(line)
+    } catch {
+      return unknown(line)
+    }
+  }
   return unknown(line)
+}
+
+/** Startup lines a family prints under its own tag, once (both versions' source). */
+const TAGGED_NOTES = [
+  /^forward costs timed up to \d+ rows of a shared round's \d+/,
+  /windows of up to \d+ rows reproduce one-(row|token) steps/,
+  /^row-exact kernels: /,
+  /^no verify window reproduces one-token steps/,
+  /^routed experts stream from SSD into /,
+  /does not reproduce (each stream's own call|serial steps)/,
+  /^exact window \d+ rows, forward ms by width /
+]
+
+/** A line under an engine's or a family's tag: `[lanes] saved conversation checkpoint …`, `[glm5] exact window …`. */
+function parseTagged(tag: string, body: string): LogEvent | null {
+  let m = /^saved conversation checkpoint tokens=(\d+) \(([\d.]+) GiB\) in ([\d.]+)s$/.exec(body)
+  if (m) return { kind: 'snapshot', action: 'saved', scope: 'conversation', tokens: num(m[1]), ofTokens: null, gib: num(m[2]), seconds: num(m[3]), fromDisk: false }
+  m = /^conversation save failed: (?:([A-Za-z_]\w*): )?(.*)$/s.exec(body)
+  if (m) return { kind: 'error', what: 'snapshot-save', errorType: m[1] ?? null, message: m[2] as string }
+  if (/^(drafter build ms\/round|family rounds: |shared rounds: )|capture (write )?failed: /.test(body)) {
+    return { kind: 'notice', what: 'diagnostic', text: `${tag}: ${body}`, fields: { tag } }
+  }
+  if (TAGGED_NOTES.some((p) => p.test(body))) return { kind: 'startup', what: 'note', text: `${tag}: ${body}` }
+  return null
 }
 
 type Matcher = (body: string) => LogEvent | null
@@ -62,6 +96,7 @@ const MATCHERS: Matcher[] = [
   promptChunks,
   concurrency,
   contextWindow,
+  resumable,
   warming,
   failure,
   notice,
@@ -353,7 +388,7 @@ function concurrency(body: string): ConcurrencyStartup | null {
       /^concurrency: up to (\d+) requests? share each round; /.source,
       /memory budget ([\d.]+) GB \(MLX's share ([\d.]+) GB, or (\d+)% of ([\d.]+) GB less ([\d.]+) GB in use elsewhere\); /.source,
       /a stream ([\d.]+) MB at ([\d,]+) tokens, ([\d.]+) MB at ([\d,]+), then ([\d.]+) KB a token/.source,
-      /(?:; a shared round up to ([\d.]+) GB)?/.source,
+      /(?:; a shared round up to ([\d.]+) GB(?: at (\d+) streams?)?)?/.source,
       /(?:; ([\d,]+) streams? of ([\d,]+) tokens fit now \(more wait their turn\))?$/.source
     ].join('')
   ).exec(body)
@@ -369,16 +404,22 @@ function concurrency(body: string): ConcurrencyStartup | null {
     elsewhereGb: num(m[6]),
     stream: { shortMb: num(m[7]), shortTokens: num(m[8]), longMb: num(m[9]), longTokens: num(m[10]), perTokenKb: num(m[11]) },
     roundGb: numOrNull(m[12]),
-    fits: m[13] === undefined ? null : { streams: num(m[13]), tokens: num(m[14]) }
+    roundStreams: numOrNull(m[13]),
+    fits: m[14] === undefined ? null : { streams: num(m[14]), tokens: num(m[15]) }
   }
 }
 
 function contextWindow(body: string): LogEvent | null {
   const m =
-    /^context window ([\d,]+) tokens: the most one request can use in the ([\d.]+) GiB memory budget \(the model's window is ([\d,]+)\); have clients compact before it$/.exec(
+    /^context window ([\d,]+) tokens: the most one request can use in the ([\d.]+) GiB memory budget( and still keep its prompt for the next turn)? \(the model's window is ([\d,]+)\); have clients compact before it$/.exec(
       body
     )
-  return m ? { kind: 'startup', what: 'context-window', tokens: num(m[1]), budgetGib: num(m[2]), modelWindow: num(m[3]) } : null
+  return m ? { kind: 'startup', what: 'context-window', tokens: num(m[1]), budgetGib: num(m[2]), modelWindow: num(m[4]), keepsPrompt: m[3] !== undefined } : null
+}
+
+function resumable(body: string): LogEvent | null {
+  const m = /^requests up to ([\d,]+) tokens keep their prompt for the next turn in the ([\d.]+) GiB memory budget; a longer one is served, and its next turn prefills again$/.exec(body)
+  return m ? { kind: 'startup', what: 'resumable', tokens: num(m[1]), budgetGib: num(m[2]) } : null
 }
 
 function warming(body: string): LogEvent | null {
@@ -443,18 +484,29 @@ function notice(body: string): NoticeEvent | null {
   m = /^downloading (\S+) from Hugging Face$/.exec(body)
   if (m) return { kind: 'notice', what: 'downloading', text: body, fields: { repo: m[1] as string } }
   if (/^prefill matmul kernels (unavailable|differ)/.test(body)) return { kind: 'notice', what: 'kernels-fallback', text: body, fields: {} }
+  m = /^memory: (\d+) of (\d+) streams? wait for room \(newest first\)$/.exec(body)
+  if (m) return { kind: 'notice', what: 'memory-wait', text: body, fields: { waiting: num(m[1]), streams: num(m[2]) } }
+  m = /^memory: ended (\S+), the newest of (\d+) streams?$/.exec(body)
+  if (m) return { kind: 'notice', what: 'memory-ended', text: body, fields: { reqId: m[1] as string, streams: num(m[2]) } }
+  m = /^WARNING: (.*)$/s.exec(body)
+  if (m) return { kind: 'notice', what: 'warning', text: body, fields: { message: m[1] as string } }
+  if (/^={20,}$/.test(body)) return { kind: 'notice', what: 'warning', text: body, fields: { rule: true } }
   return null
 }
 
 const NOTES = [
   /^note: /,
   /^EXL3 (support is|packs are) experimental/,
-  /^this (EXL3 )?checkpoint has no MTP (head|layer)/,
+  /^this (\S+ )?checkpoint has no MTP (head|layer)/,
   /^\d+ tensors are not 4-bit/,
   /^GLM-5\.3-Flash runs on two NVIDIA GPUs/,
   /^Nemotron MTP head: /,
   /^rank 1 ready in /,
-  /^required model files ready: /
+  /^required model files ready: /,
+  /^image encoder: [\d.]+ GiB workspace measured/,
+  /^config\.json lists a layer type for each MTP layer too/,
+  /: the codes widened to 4 bits would leave too little of this Mac's memory budget/,
+  /: \d+ of \d+ layers widened for speed/
 ]
 
 function note(body: string): LogEvent | null {

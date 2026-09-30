@@ -2,7 +2,7 @@ import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
-import { applyPreset, emptyConfig } from '@shared/config'
+import { FLAGS, applyPreset, emptyConfig } from '@shared/config'
 import type { HealthSample } from '@shared/health'
 import { defaultSettings } from '@shared/settings'
 import { reproduceCommandLine } from '@shared/snapshot'
@@ -182,15 +182,72 @@ describe('P1 against the mock', () => {
     const snapshot = JSON.parse(readFileSync(exported.path, 'utf8')) as import('@shared/snapshot').ServingSnapshot
     expect(reproduceCommandLine(snapshot)).toBe(snapshot.commandLine)
     expect(snapshot.commandLine).toBe(d.session().state.commandLine)
-    expect(Object.keys(snapshot.flags)).toHaveLength(34)
+    expect(Object.keys(snapshot.flags)).toHaveLength(FLAGS.length)
     expect(snapshot).toMatchObject({
-      tensorfold: { version: '0.3.6.2' },
+      tensorfold: { version: '0.5.0' },
+      extraFlags: {},
       checkpoint: { path: MOCK_MODEL, configSha256: expect.stringMatching(/^[0-9a-f]{64}$/) },
       drafter: { repo: 'z-lab/Qwen3.8-27B-DFlash2', block: 8, bits: 4 },
-      serving: { model: 'Qwen3.8-27B-MLX-8bit', context: 89600, drafts: true, lanes: 8 },
+      serving: { model: 'Qwen3.8-27B-MLX-8bit', context: 89600, drafts: true, lanes: 8, keptPromptTokens: 49664 },
       runner: { CODELEAD_BASE_URL: `http://127.0.0.1:${config.endpoint.port}/v1`, CODELEAD_MODEL: 'Qwen3.8-27B-MLX-8bit' }
     })
     expect(d.runnerLines()).toBe(`CODELEAD_BASE_URL=http://127.0.0.1:${config.endpoint.port}/v1\nCODELEAD_MODEL=Qwen3.8-27B-MLX-8bit`)
+    await d.stop()
+  })
+})
+
+describe('the installed version', () => {
+  it("checks the form against the binary's serve --help: a flag its version lacks is an error", async () => {
+    const config = { ...applyPreset(emptyConfig(MOCK_MODEL), 'endorsed'), generation: { context: 89600, minP: 0.05 } }
+    config.endpoint.port = await freePort()
+    const newer = await desk().validate(config)
+    expect(newer.filter((i) => i.severity === 'error')).toEqual([])
+    const old = desk({}, { MOCK_TENSORFOLD_VERSION: '0.3.6.2' })
+    expect((await old.validate(config)).filter((i) => i.severity === 'error')).toEqual([
+      { field: 'generation.minP', message: 'tensorfold 0.3.6.2 has no --min-p (it came in 0.5.0)', severity: 'error' }
+    ])
+    expect(await old.start(config)).toMatchObject({ ok: false, error: 'the configuration has errors' })
+    const extra = await desk().validate({ ...config, generation: { context: 89600 }, extra: { '--future-share': '0.5' } })
+    expect(extra).toContainEqual({ field: 'extra.--future-share', message: 'tensorfold 0.5.0 has no --future-share', severity: 'error' })
+  })
+
+  it('refuses --vision for a checkpoint without a vision config, as TensorFold would', async () => {
+    const config = { ...emptyConfig(MOCK_MODEL), endpoint: { port: await freePort(), vision: true } }
+    expect(await desk().validate(config)).toContainEqual({ field: 'endpoint.vision', message: 'this checkpoint has no vision_config: --vision needs a vision-language checkpoint', severity: 'error' })
+    const dir = mkdtempSync(join(tmpdir(), 'tfdesk-vl-'))
+    writeFileSync(join(dir, 'config.json'), JSON.stringify({ model_type: 'qwen3_5', vision_config: { depth: 27 } }))
+    expect((await desk().validate({ ...config, model: dir })).filter((i) => i.field === 'endpoint.vision')).toEqual([])
+    expect(await desk().validate({ ...config, model: dir, endpoint: { visionUrls: true } })).toContainEqual({ field: 'endpoint.visionUrls', message: 'needs --vision', severity: 'error' })
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('checks for a newer release with `update --check`, installing nothing', async () => {
+    expect(await desk().checkUpdate()).toMatchObject({ ok: true, current: '0.5.0', latest: '0.5.0', newer: false, command: `${MOCK} update` })
+    expect(await desk({}, { MOCK_TENSORFOLD_LATEST: '0.6.0' }).checkUpdate()).toMatchObject({
+      ok: true,
+      current: '0.5.0',
+      latest: '0.6.0',
+      newer: true,
+      notesUrl: 'https://github.com/ashhart/TensorFold/releases/tag/v0.6.0'
+    })
+    const offline = await desk({}, { MOCK_TENSORFOLD_LATEST: 'offline' }).checkUpdate()
+    expect(offline).toMatchObject({ ok: false, newer: false })
+    expect(offline.error).toMatch(/^could not reach GitHub/)
+  })
+
+  it('dumps the stacks with SIGUSR1 only once TensorFold has armed it, and they arrive on stderr', async () => {
+    const d = desk({}, { MOCK_TENSORFOLD_INTERVAL_MS: '0', MOCK_TENSORFOLD_LOAD_MS: '1500' })
+    expect(d.dumpStacks()).toEqual({ ok: false, error: 'the server is not running' })
+    const config = applyPreset(emptyConfig(MOCK_MODEL), 'endorsed')
+    config.endpoint.port = await freePort()
+    await d.start(config)
+    expect(d.dumpStacks()).toMatchObject({ ok: false, error: expect.stringMatching(/^not yet/) })
+    await new Promise<void>((resolve) => d.on('state', (s) => s.status === 'serving' && resolve()))
+    const dumped = new Promise<void>((resolve) => d.on('lines', (lines) => lines.some((l) => l.stream === 'stderr' && l.text.startsWith('Current thread 0x')) && resolve()))
+    expect(d.dumpStacks()).toEqual({ ok: true })
+    await dumped
+    expect(d.session().state.status).toBe('serving')
+    expect(d.session().lines.some((l) => l.stream === 'desk' && l.text.startsWith('SIGUSR1 sent'))).toBe(true)
     await d.stop()
   })
 })

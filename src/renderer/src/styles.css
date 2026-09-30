@@ -335,6 +335,16 @@ textarea {
   font-family: var(--mono);
 }
 
+.chip.warn {
+  border-color: var(--warn);
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.chip.warn b {
+  color: var(--warn);
+}
+
 .state {
   display: inline-flex;
   align-items: center;
@@ -684,6 +694,16 @@ textarea.input {
 
 .field.wide {
   grid-column: 1 / -1;
+}
+
+.field.dim .field-label code,
+.field.dim .field-help {
+  color: var(--faint);
+}
+
+.field.dim .input,
+.field.dim .select {
+  opacity: 0.55;
 }
 
 .field-label {
@@ -1197,7 +1217,7 @@ table.data td.message .msg {
 }
 
 .log-toolbar .input {
-  width: 280px;
+  width: 220px;
 }
 
 .toggle-chip {

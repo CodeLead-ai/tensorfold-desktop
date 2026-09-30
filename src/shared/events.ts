@@ -1,8 +1,9 @@
 /**
  * What `tensorfold serve` prints, parsed: src/main/LogParser.ts turns one line into one event.
- * Formats are the installed 0.3.6.2's (SPEC §2.3 and Appendix A, the K3 serve log of 2026-09-29, and
- * the release's source). Numbers are numbers, durations are seconds, sizes keep the unit the line
- * states (GiB, GB, MB, KB are TensorFold's own, and it is not always consistent about GiB vs GB).
+ * Formats are 0.3.6.2's (SPEC §2.3 and Appendix A, the K3 serve log of 2026-09-29, and the release's source)
+ * and 0.5.0's (its source: the lines it changed or added are marked 0.4.0 or 0.5.0). Numbers are numbers,
+ * durations are seconds, sizes keep the unit the line states (GiB, GB, MB, KB are TensorFold's own, and it is
+ * not always consistent about GiB vs GB).
  */
 
 export type LogEvent =
@@ -31,6 +32,7 @@ export type StartupEvent =
   | PromptChunksStartup
   | ConcurrencyStartup
   | ContextWindowStartup
+  | ResumableStartup
   | WarmingStartup
   | NoteStartup
 
@@ -117,7 +119,8 @@ export interface PromptChunksStartup {
  * `concurrency: up to 8 requests share each round; memory budget 36.2 GB (MLX's share 41.8 GB, or 70% of
  * 64 GB less 8.6 GB in use elsewhere); a stream 163 MB at 64 tokens, 394 MB at 2,112, then 114.0 KB a token;
  * a shared round up to 1.40 GB; 2 streams of 8,192 tokens fit now (more wait their turn)`
- * (SPEC Appendix A's copy stops after "a token"; the last two clauses are then null.)
+ * (SPEC Appendix A's copy stops after "a token"; the last two clauses are then null.) From 0.4.0 the round
+ * clause names its streams: `a shared round up to 1.40 GB at 8 streams`.
  */
 export interface ConcurrencyStartup {
   kind: 'startup'
@@ -130,16 +133,36 @@ export interface ConcurrencyStartup {
   elsewhereGb: number
   stream: { shortMb: number; shortTokens: number; longMb: number; longTokens: number; perTokenKb: number }
   roundGb: number | null
+  /** The streams the shared round is sized for (0.4.0+). */
+  roundStreams: number | null
   fits: { streams: number; tokens: number } | null
 }
 
-/** `context window 65,536 tokens: the most one request can use in the 44.8 GiB memory budget (the model's window is 262,144); have clients compact before it` */
+/**
+ * `context window 65,536 tokens: the most one request can use in the 44.8 GiB memory budget (the model's window
+ * is 262,144); have clients compact before it`. Printed when --context is not given and the budget fits less
+ * than the model's window. From 0.4.0 it reads "… memory budget and still keep its prompt for the next turn (…".
+ */
 export interface ContextWindowStartup {
   kind: 'startup'
   what: 'context-window'
   tokens: number
   budgetGib: number
   modelWindow: number
+  /** 0.4.0+: the fitted window also keeps each request's prompt for its next turn. */
+  keepsPrompt: boolean
+}
+
+/**
+ * `requests up to 61,440 tokens keep their prompt for the next turn in the 44.8 GiB memory budget; a longer one
+ * is served, and its next turn prefills again` (0.4.0+, when --context is given and the budget keeps less).
+ * `tokens` counts prompt and reply.
+ */
+export interface ResumableStartup {
+  kind: 'startup'
+  what: 'resumable'
+  tokens: number
+  budgetGib: number
 }
 
 /** `warming 2 saved system block(s) for these kernels in the background: …` */
@@ -249,7 +272,8 @@ export interface AccessEvent {
 /**
  * `loaded system-block snapshot tokens=640 in 0.0s`, `read conversation snapshot tokens=9370 from disk in 0.06s`,
  * `saved system-block snapshot tokens=… in …s`, `warmed system block tokens=… of … in …s`,
- * `spilled conversation tokens=… (… GiB) in …s`
+ * `spilled conversation tokens=… (… GiB) in …s`, and, as the server stops, the lane engine's
+ * `[lanes] saved conversation checkpoint tokens=36738 (2.5 GiB) in 0.4s` (one per conversation kept).
  */
 export interface SnapshotEvent {
   kind: 'snapshot'
@@ -281,11 +305,16 @@ export interface ErrorEvent {
 /**
  * `slow round 812 ms streams=3 width=24 rows=48 forward=790`, `stalled 125s: queued=… ; every thread's stack follows`,
  * `rerun of a preempted request diverged: …`, update notices, `downloading <repo> from Hugging Face`,
- * `prefill matmul kernels unavailable (…)`.
+ * `prefill matmul kernels unavailable (…)` (0.3.6.2), and from 0.4.0: `memory: 2 of 5 streams wait for room
+ * (newest first)` (`waiting`, `streams`), `memory: ended req-…, the newest of 5 streams` (`reqId`, `streams`: the
+ * request was stopped with an error that names --parallel), and a boxed `WARNING: …` (a prompt kernel that does
+ * not build; its `====` rule lines have `rule: true`). `diagnostic`: the lane engine's periodic profile lines and
+ * capture failures, printed only under TensorFold's profiling and capture variables (TF_PROFILE, TF_DRAFT_PROFILE,
+ * TF_DRAFT_CAPTURE); `tag` is the line's `[lanes]`-style tag.
  */
 export interface NoticeEvent {
   kind: 'notice'
-  what: 'slow-round' | 'stalled' | 'diverged' | 'update-available' | 'whats-new' | 'downloading' | 'kernels-fallback'
+  what: 'slow-round' | 'stalled' | 'diverged' | 'update-available' | 'whats-new' | 'downloading' | 'kernels-fallback' | 'memory-wait' | 'memory-ended' | 'warning' | 'diagnostic'
   text: string
   fields: Record<string, number | string | boolean>
 }

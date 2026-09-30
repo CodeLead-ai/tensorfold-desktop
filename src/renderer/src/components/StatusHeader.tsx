@@ -28,7 +28,8 @@ export function StatusHeader(): React.JSX.Element {
   const live = status === 'serving' || status === 'loading' || status === 'stopping'
   const maxBatch = health?.ok ? health.health.max_batch_size : undefined
   const lanes = lanesOf(info, maxBatch)
-  const sampling = serving ? (serving.greedy ? 'greedy' : Object.entries(serving.sampling).map(([k, v]) => `${k.replace('temperature', 'T').replace('top_k', 'k').replace('top_p', 'p')} ${v}`).join(' · ')) : null
+  const sampling = serving ? (serving.greedy ? 'greedy' : Object.entries(serving.sampling).map(([k, v]) => `${k.replace('temperature', 'T').replace('top_k', 'k').replace('top_p', 'p').replace('min_p', 'min p')} ${v}`).join(' · ')) : null
+  const waiting = status === 'serving' && info.memoryWait && info.memoryWait.waiting > 0 ? info.memoryWait : null
 
   return (
     <header className="header">
@@ -47,6 +48,13 @@ export function StatusHeader(): React.JSX.Element {
             <>
               <Chip k="port" v={String(serving?.port ?? server.config?.endpoint.port ?? 8080)} />
               <Chip k="context" v={serving ? (serving.context === null ? 'unlimited' : int(serving.context)) : int(server.config?.generation.context)} />
+              {info.resumable && (
+                <Chip
+                  k="prompts kept"
+                  v={`≤ ${int(info.resumable.tokens)}`}
+                  title="A request up to this many tokens (prompt and reply) keeps its prompt for the next turn; a longer one is served, and its next turn prefills again"
+                />
+              )}
               {serving && <Chip k="drafts" v={serving.drafts ? (drafterName(info) ?? 'on') : 'off'} />}
               {sampling && <Chip k="sampling" v={sampling} />}
               {serving && <Chip k="loaded in" v={`${serving.loadedInS.toFixed(1)} s`} />}
@@ -54,6 +62,14 @@ export function StatusHeader(): React.JSX.Element {
               {server.version && <Chip k="tensorfold" v={server.version} />}
               <Chip k="backend" v={(serving?.backend ?? info.loading?.backend ?? 'mlx').toUpperCase()} />
               {lanes !== null && <Chip k="lanes" v={String(lanes)} />}
+              {waiting && (
+                <Chip
+                  tone="warn"
+                  k="waiting for memory"
+                  v={`${waiting.waiting} of ${waiting.streams} streams`}
+                  title="Memory ran short: the newest streams pause until the older ones finish. If it gets shorter still, the newest ends with an error; a smaller --parallel avoids that"
+                />
+              )}
             </>
           ) : (
             <span className="muted" style={{ fontSize: 12 }}>
@@ -92,9 +108,9 @@ export function StatusHeader(): React.JSX.Element {
   )
 }
 
-function Chip({ k, v }: { k: string; v: string }): React.JSX.Element {
+function Chip({ k, v, title, tone }: { k: string; v: string; title?: string; tone?: 'warn' }): React.JSX.Element {
   return (
-    <span className="chip">
+    <span className={`chip ${tone ?? ''}`} title={title}>
       {k} <b>{v}</b>
     </span>
   )

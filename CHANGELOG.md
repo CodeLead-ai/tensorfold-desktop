@@ -1,5 +1,41 @@
 # Changelog
 
+## Unreleased: TensorFold 0.5.0 (2026-09-30)
+
+This Mac's TensorFold moved from 0.3.6.2 to 0.5.0 (see [NOTES.md](NOTES.md#tensorfold-050-installed-2026-09-30)).
+The app follows it, and still runs with 0.3.6.2.
+
+- **The form follows the installed version.** The app reads the binary's `serve --help`. The flags 0.3.6.3–0.5.0
+  added are in the table: `--vision`, `--vision-urls`, `--min-p` and `--decode-share`. A flag the binary lacks is
+  dimmed with the release that added it, and setting it is an error. A later release's flags that the table lacks
+  get plain fields under "More flags". Snapshots keep them too.
+- `--reasoning-effort`'s default shows 0.5.0's: the chat template's own (xhigh for Qwen3.8). The endorsed preset still
+  passes medium.
+- **0.5.0's log lines:**
+  - The concurrency line names the round's streams; it had stopped parsing.
+  - The fitted context line's new wording.
+  - "requests up to N tokens keep their prompt for the next turn": a header chip and a Startup line. The feed marks
+    the requests past it, whose next turn prefills again.
+  - `memory: … wait for room`: a header chip while streams wait. `memory: ended …`: a row in the feed.
+  - The boxed prompt-kernel warning, and the new startup notes.
+- **Check for a newer release** in Settings: `tensorfold update --check`, run only when asked. It shows the command
+  that installs the release and the release notes' link.
+- **Dump stacks** (Server and Log views): SIGUSR1 once TensorFold has armed it; the stacks arrive on stderr.
+- The mock plays 0.5.0 (or 0.3.6.2), with `serve --help`, `update --check`, SIGUSR1 and memory pressure. It refuses
+  flags its version lacks.
+- `npm run test:real` checks the detected version and that the form has every flag of the binary. It dumps stacks
+  on the real server and runs the update check. It keeps each session's lines in `.tmp/` and fails on a stdout line
+  the parser does not know.
+- **Lines under other tags.** The lane engine's `[lanes] saved conversation checkpoint …`, printed as the server
+  stops, was unknown to the parser, in 0.3.6.2 too. The first 0.5.0 acceptance run caught it. Now `[lanes]` lines
+  and the families' `[glm5]`, `[gemma4]`, `[nemotron]` and `[deepseek_v4]` lines parse: snapshots, errors,
+  diagnostics and startup notes.
+- Two real 0.5.0 serve sessions from that run are fixtures. Every stdout line of them is known.
+- The mock, as 0.5.0, prints that run's recorded startup, warms and saves the system block, and saves conversations
+  when stopped. Its stack dump names threads, as Python 3.14's faulthandler does.
+- A failed `npm run test:real` keeps its logs but not the snapshots TensorFold saved in its folder (GiBs).
+- Tests: 182 unit tests (from 140) and 8 UI tests (from 6); screenshots regenerated.
+
 ## 0.1.0 (2026-09-29)
 
 The first version, built step by step from [SPEC.md](SPEC.md) and the build prompt. It targets the installed

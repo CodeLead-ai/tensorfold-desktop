@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   ArgvError,
@@ -13,27 +15,19 @@ import {
   shellQuote,
   type ServeConfig
 } from '@shared/config'
+import { missingFlags, parseServeHelp } from '@shared/serveHelp'
 
 const MODEL = '/Users/peter/.lmstudio/models/lmstudio-community/Qwen3.8-27B-MLX-8bit'
-
-/** The flags `tensorfold serve --help` lists (installed 0.3.6.2), in its order. */
-const HELP_FLAGS = [
-  '--host', '--port', '--name', '--alias',
-  '--context', '--max-tokens', '--temperature', '--top-p', '--top-k', '--thinking', '--reasoning-effort', '--thinking-budget',
-  '--no-drafts', '--drafter', '--drafter-bits', '--mtp-drafts', '--mtp-confidence', '--lane-kernels', '--prompt-cache-gib',
-  '--checkpoint-slots', '--spill-gib', '--snapshot-dir', '--max-snapshots', '--parallel', '--mlx-cache-gib', '--ssd-experts',
-  '--ple-on-ssd', '--no-update-check',
-  '--backend', '--tp', '--rank', '--master', '--master-port', '--kv-dtype'
-]
+const help = (version: string): string => readFileSync(join(__dirname, '..', 'fixtures', `tensorfold-serve-help-${version}.txt`), 'utf8')
 
 function everyFlag(): ServeConfig {
   return {
     model: MODEL,
-    endpoint: { host: '0.0.0.0', port: 8081, name: 'qwen', alias: ['a', 'b'] },
-    generation: { context: 65536, maxTokens: 2048, temperature: 0.6, topP: 0.95, topK: 20, thinking: false, reasoningEffort: 'xhigh', thinkingBudget: 512 },
+    endpoint: { host: '0.0.0.0', port: 8081, name: 'qwen', alias: ['a', 'b'], vision: true, visionUrls: true },
+    generation: { context: 65536, maxTokens: 2048, temperature: 0.6, topP: 0.95, topK: 20, minP: 0.05, thinking: false, reasoningEffort: 'xhigh', thinkingBudget: 512 },
     drafting: {
       noDrafts: true, drafter: 'none', drafterBits: 0, mtpDrafts: 3, mtpConfidence: 0.3, laneKernels: 'off', promptCacheGib: 4,
-      checkpointSlots: 16, spillGib: 10, snapshotDir: '/tmp/snaps', maxSnapshots: 2, parallel: 'auto', mlxCacheGib: 6,
+      checkpointSlots: 16, spillGib: 10, snapshotDir: '/tmp/snaps', maxSnapshots: 2, parallel: 'auto', decodeShare: 0.5, mlxCacheGib: 6,
       ssdExperts: 12.5, pleOnSsd: true, noUpdateCheck: true
     },
     nvidia: { backend: 'cuda', tp: 2, rank: 1, master: '10.0.0.2', masterPort: 29600, kvDtype: 'int8' },
@@ -42,8 +36,18 @@ function everyFlag(): ServeConfig {
 }
 
 describe('the flag table', () => {
-  it('lists every flag of `tensorfold serve --help`, in its order', () => {
-    expect(FLAGS.map((f) => f.cli)).toEqual(HELP_FLAGS)
+  it('lists every flag of the installed 0.5.0 `tensorfold serve --help`, in its order', () => {
+    expect(FLAGS.map((f) => f.cli)).toEqual(parseServeHelp(help('0.5.0')).map((f) => f.cli))
+  })
+
+  it("marks the flags 0.3.6.2's serve --help lacks with the release that added them", () => {
+    expect(missingFlags(parseServeHelp(help('0.3.6.2'))).map((f) => [f.cli, f.since])).toEqual([
+      ['--vision', '0.3.6.3'],
+      ['--vision-urls', '0.3.6.3'],
+      ['--min-p', '0.5.0'],
+      ['--decode-share', '0.3.6.3']
+    ])
+    expect(FLAGS.filter((f) => f.since).map((f) => f.cli)).toEqual(['--vision', '--vision-urls', '--min-p', '--decode-share'])
   })
 
   it('puts the CUDA-only flags in the NVIDIA group', () => {
@@ -69,12 +73,12 @@ describe('buildServeArgv', () => {
   it('renders every flag in help order, each in its form', () => {
     expect(buildServeArgv(everyFlag())).toEqual([
       'serve', MODEL,
-      '--host', '0.0.0.0', '--port', '8081', '--name', 'qwen', '--alias', 'a', '--alias', 'b',
-      '--context', '65536', '--max-tokens', '2048', '--temperature', '0.6', '--top-p', '0.95', '--top-k', '20', '--no-thinking',
+      '--host', '0.0.0.0', '--port', '8081', '--name', 'qwen', '--alias', 'a', '--alias', 'b', '--vision', '--vision-urls',
+      '--context', '65536', '--max-tokens', '2048', '--temperature', '0.6', '--top-p', '0.95', '--top-k', '20', '--min-p', '0.05', '--no-thinking',
       '--reasoning-effort', 'xhigh', '--thinking-budget', '512',
       '--no-drafts', '--drafter', 'none', '--drafter-bits', '0', '--mtp-drafts', '3', '--mtp-confidence', '0.3', '--lane-kernels', 'off',
       '--prompt-cache-gib', '4', '--checkpoint-slots', '16', '--spill-gib', '10', '--snapshot-dir', '/tmp/snaps', '--max-snapshots', '2',
-      '--parallel', 'auto', '--mlx-cache-gib', '6', '--ssd-experts', '12.5', '--ple-on-ssd', '--no-update-check',
+      '--parallel', 'auto', '--decode-share', '0.5', '--mlx-cache-gib', '6', '--ssd-experts', '12.5', '--ple-on-ssd', '--no-update-check',
       '--backend', 'cuda', '--tp', '2', '--rank', '1', '--master', '10.0.0.2', '--master-port', '29600', '--kv-dtype', 'int8'
     ])
   })
@@ -97,6 +101,12 @@ describe('buildServeArgv', () => {
 
   it('passes a numeric --parallel', () => {
     expect(buildServeArgv({ ...emptyConfig(MODEL), drafting: { parallel: 4 } })).toEqual(['serve', MODEL, '--parallel', '4'])
+  })
+
+  it("passes a newer TensorFold's flags (unknown to the table) after the rest, as set", () => {
+    const config: ServeConfig = { ...emptyConfig(MODEL), generation: { context: 4096 }, extra: { '--future-share': '0.5', '--turbo': true, '--empty': '' } }
+    expect(buildServeArgv(config)).toEqual(['serve', MODEL, '--context', '4096', '--future-share', '0.5', '--turbo'])
+    expect(presetOf({ ...applyPreset(config, 'endorsed'), extra: { '--turbo': true } })).toBe('custom')
   })
 })
 
@@ -147,6 +157,20 @@ describe('parseServeArgv', () => {
     expect(parsed.generation.context).toBe(4096)
   })
 
+  it("keeps a newer TensorFold's flags when the binary lists them, and refuses them otherwise", () => {
+    const argv = ['serve', MODEL, '--port', '8080', '--future-share', '0.5', '--turbo', '--context=4096']
+    const others = [
+      { cli: '--future-share', takesValue: true },
+      { cli: '--turbo', takesValue: false }
+    ]
+    const parsed = parseServeArgv(argv, others)
+    expect(parsed.extra).toEqual({ '--future-share': '0.5', '--turbo': true })
+    expect(parsed.generation.context).toBe(4096)
+    expect(buildServeArgv(parsed)).toEqual(['serve', MODEL, '--port', '8080', '--context', '4096', '--future-share', '0.5', '--turbo'])
+    expect(() => parseServeArgv(argv)).toThrow(/unknown flag --future-share/)
+    expect(parseServeArgv(['serve', MODEL]).extra).toBeUndefined()
+  })
+
   it('rejects what tensorfold would reject', () => {
     expect(() => parseServeArgv(['serve', MODEL, '--port', 'x'])).toThrow(ArgvError)
     expect(() => parseServeArgv(['serve', MODEL, '--reasoning-effort', 'high'])).toThrow(ArgvError)
@@ -166,12 +190,13 @@ describe('presets', () => {
     expect(presetOf(emptyConfig(MODEL))).toBe('custom')
   })
 
-  it('keeps the model and the environment when a preset is applied', () => {
-    const config = { ...everyFlag() }
+  it('keeps the model and the environment when a preset is applied, and drops flags the preset does not set', () => {
+    const config = { ...everyFlag(), extra: { '--turbo': true as const } }
     const applied = applyPreset(config, 'endorsed')
     expect(applied.model).toBe(MODEL)
     expect(applied.env).toEqual({ memoryLimitGb: 51.8 })
     expect(applied.nvidia).toEqual({})
+    expect(applied.extra).toBeUndefined()
   })
 
   it('does not share state between applications of a preset', () => {

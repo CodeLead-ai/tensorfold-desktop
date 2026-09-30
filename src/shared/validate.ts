@@ -1,9 +1,17 @@
 /**
  * Checks on a serve configuration that need no I/O (SPEC §3.1: context is a positive integer, and the
- * rest of the flags' ranges). The main process adds the checks that do: the model folder has a
- * config.json, and the port is free.
+ * rest of the flags' ranges), and, given the installed binary's `serve --help`, that it has every flag set.
+ * The main process adds the checks that need the disk and the network: the model folder has a config.json
+ * (and a vision config for --vision), and the port is free.
  */
-import { FLAGS, type ServeConfig } from './config'
+import { FLAGS, renderFlag, type ServeConfig } from './config'
+
+/** The installed binary, for the flags its version has. */
+export interface BinaryFlags {
+  version: string | null
+  /** Every switch its `serve --help` lists (serveHelp.ts helpSwitches). */
+  switches: ReadonlySet<string>
+}
 
 export interface ValidationIssue {
   /** `model`, `env.memoryLimitGb`, or `<group>.<key>` of a flag. */
@@ -38,6 +46,7 @@ const NUMBER_RULES: Record<string, Rule[]> = {
   'generation.temperature': [nonNegative],
   'generation.topP': [fraction],
   'generation.topK': [integer, nonNegative],
+  'generation.minP': [probability],
   'generation.thinkingBudget': [integer, nonNegative],
   'drafting.drafterBits': [integer, nonNegative],
   'drafting.mtpDrafts': [integer, nonNegative],
@@ -46,12 +55,18 @@ const NUMBER_RULES: Record<string, Rule[]> = {
   'drafting.checkpointSlots': [integer, positive],
   'drafting.spillGib': [nonNegative],
   'drafting.maxSnapshots': [integer, nonNegative],
+  'drafting.decodeShare': [nonNegative],
   'drafting.mlxCacheGib': [nonNegative],
   'drafting.ssdExperts': [positive],
   'nvidia.masterPort': [integer, portRange]
 }
 
-export function validateConfig(config: ServeConfig, platform: string = 'darwin'): ValidationIssue[] {
+/** `tensorfold 0.3.6.2 has no --min-p (it came in 0.5.0)`. */
+export function notInBinary(cli: string, binary: BinaryFlags, since?: string): string {
+  return `tensorfold ${binary.version ?? '(this one)'} has no ${cli}${since ? ` (it came in ${since})` : ''}`
+}
+
+export function validateConfig(config: ServeConfig, platform: string = 'darwin', binary: BinaryFlags | null = null): ValidationIssue[] {
   const issues: ValidationIssue[] = []
   const error = (field: string, message: string): void => void issues.push({ field, message, severity: 'error' })
   const warning = (field: string, message: string): void => void issues.push({ field, message, severity: 'warning' })
@@ -83,6 +98,11 @@ export function validateConfig(config: ServeConfig, platform: string = 'darwin')
     }
     if (spec.key === 'host' && (typeof value !== 'string' || /\s/.test(value))) error(field, 'must be an address without spaces')
     if (spec.macNoEffect && platform === 'darwin') warning(field, 'does nothing on a Mac (NVIDIA only)')
+    if (binary && !binary.switches.has(spec.cli) && renderFlag(spec, value).length > 0) error(field, notInBinary(spec.cli, binary, spec.since))
+  }
+  for (const [cli, value] of Object.entries(config.extra ?? {})) {
+    if (value === '' || value === undefined) continue
+    if (binary && !binary.switches.has(cli)) error(`extra.${cli}`, notInBinary(cli, binary))
   }
 
   const { spillGib, snapshotDir } = config.drafting
@@ -93,6 +113,7 @@ export function validateConfig(config: ServeConfig, platform: string = 'darwin')
   if (context !== undefined && maxTokens !== undefined && maxTokens >= context) {
     warning('generation.maxTokens', 'the default reply is as long as the whole context window')
   }
+  if (config.endpoint.visionUrls === true && config.endpoint.vision !== true) error('endpoint.visionUrls', 'needs --vision')
   const host = config.endpoint.host
   if (host !== undefined && host !== '' && host !== '127.0.0.1' && host !== 'localhost' && host !== '::1') {
     warning('endpoint.host', 'listening beyond this Mac makes the server reachable from the network')

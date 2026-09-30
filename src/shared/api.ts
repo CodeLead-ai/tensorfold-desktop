@@ -10,8 +10,10 @@ import type { HealthSample } from './health'
 import type { CommandResult, LmStudioStatus } from './lmstudio'
 import type { ProbeRequest, ProbeResult } from './probe'
 import type { PullState } from './pull'
+import type { HelpFlag } from './serveHelp'
 import type { SessionInfo } from './session'
 import type { Settings } from './settings'
+import type { UpdateCheck } from './update'
 import type { ValidationIssue } from './validate'
 
 /** SPEC §3.1: stopped → loading → serving → stopping → stopped. */
@@ -81,6 +83,8 @@ export interface BinaryInfo {
   error: string | null
   /** Places looked at, in order. */
   searched: string[]
+  /** The flags its `serve --help` lists, in order; null when it could not be read. */
+  serveHelp: HelpFlag[] | null
 }
 
 export interface SessionSnapshot {
@@ -141,6 +145,10 @@ export interface DeskApi {
   runnerLines(): Promise<string | null>
   networkAudit(): Promise<AuditEntry[]>
   logsInfo(): Promise<LogsInfo>
+  /** `tensorfold update --check`: the CLI asks GitHub whether a newer release exists. Installs nothing. */
+  checkUpdate(): Promise<UpdateCheck>
+  /** SIGUSR1: TensorFold prints every thread's Python stack on stderr (the Log view shows it). */
+  dumpStacks(): Promise<ActionResult>
 }
 
 export const CHANNELS = {
@@ -173,5 +181,7 @@ export const CHANNELS = {
   exportSnapshot: 'snapshot:export',
   runnerLines: 'snapshot:runner',
   networkAudit: 'audit:list',
-  logsInfo: 'logs:info'
+  logsInfo: 'logs:info',
+  checkUpdate: 'binary:update-check',
+  dumpStacks: 'server:dump-stacks'
 } as const

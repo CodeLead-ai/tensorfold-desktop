@@ -3,7 +3,7 @@
  * the ProcessManager and the HealthPoller together. Electron-free, so it is tested with the mock.
  */
 import { EventEmitter } from 'node:events'
-import { existsSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ActionResult, BinaryInfo, LogsInfo, ServerState, SessionSnapshot, SnapshotResult, StepsResult } from '@shared/api'
 import type { CheckpointScan } from '@shared/checkpoints'
@@ -13,10 +13,12 @@ import type { HealthSample } from '@shared/health'
 import type { CommandResult, LmStudioStatus } from '@shared/lmstudio'
 import type { ProbeRequest, ProbeResult } from '@shared/probe'
 import type { PullState } from '@shared/pull'
+import { helpSwitches } from '@shared/serveHelp'
 import type { Settings } from '@shared/settings'
 import { runnerLines } from '@shared/snapshot'
+import type { UpdateCheck } from '@shared/update'
 import { hasErrors, looksLikePath, validateConfig, type ValidationIssue } from '@shared/validate'
-import { findBinary } from './binary'
+import { findBinary, signalsReachPython } from './binary'
 import { Checkpoints } from './Checkpoints'
 import { LmStudio } from './LmStudio'
 import { logStats, pruneLogs } from './logRetention'
@@ -27,6 +29,7 @@ import { HealthPoller, healthBase } from './HealthPoller'
 import { describePortOwner, isPortFree } from './ports'
 import { ProcessManager } from './ProcessManager'
 import type { SettingsStore } from './Settings'
+import { runUpdateCheck } from './UpdateCheck'
 
 export interface DeskOptions {
   settings: SettingsStore
@@ -60,6 +63,17 @@ export function expandHome(path: string, home: string): string {
 /** The configuration as it will run: `~` expanded, the model trimmed. */
 export function normalizeConfig(config: ServeConfig, home: string): ServeConfig {
   return { ...config, model: expandHome(config.model.trim(), home) }
+}
+
+/** Whether a checkpoint's config.json has the vision tower's config (TensorFold's check for --vision). */
+function hasVisionConfig(configPath: string): boolean {
+  try {
+    const config = JSON.parse(readFileSync(configPath, 'utf8')) as Record<string, unknown>
+    const vision = config['vision_config']
+    return typeof vision === 'object' && vision !== null && Object.keys(vision).length > 0
+  } catch {
+    return true // unreadable here: TensorFold says what is wrong
+  }
 }
 
 export class Desk extends EventEmitter<DeskEvents> {
@@ -135,16 +149,20 @@ export class Desk extends EventEmitter<DeskEvents> {
     return formatCommandLine(binary, buildServeArgv(normalized), buildServeEnv(normalized))
   }
 
-  /** The form's checks, plus the ones that need the disk and the network. */
+  /** The form's checks, the flags the installed version has, and the checks that need the disk and the network. */
   async validate(config: ServeConfig): Promise<ValidationIssue[]> {
     const normalized = normalizeConfig(config, this.opts.home)
-    const issues = validateConfig(normalized, this.opts.platform)
+    const binary = await this.binary()
+    const flags = binary.serveHelp ? { version: binary.version, switches: helpSwitches(binary.serveHelp) } : null
+    const issues = validateConfig(normalized, this.opts.platform, flags)
     const model = normalized.model
     if (model !== '' && looksLikePath(model)) {
       if (!existsSync(model)) issues.push({ field: 'model', message: 'no such folder', severity: 'error' })
       else if (!statSync(model).isDirectory()) issues.push({ field: 'model', message: 'not a folder', severity: 'error' })
       else if (!existsSync(join(model, 'config.json'))) {
         issues.push({ field: 'model', message: 'the folder has no config.json (GGUF checkpoints are not servable by TensorFold)', severity: 'error' })
+      } else if (normalized.endpoint.vision === true && !hasVisionConfig(join(model, 'config.json'))) {
+        issues.push({ field: 'endpoint.vision', message: 'this checkpoint has no vision_config: --vision needs a vision-language checkpoint', severity: 'error' })
       }
     }
     const port = normalized.endpoint.port ?? 8080
@@ -182,6 +200,34 @@ export class Desk extends EventEmitter<DeskEvents> {
     if (!this.manager.running) return { ok: false, error: 'the server is not running' }
     this.manager.kill()
     return { ok: true }
+  }
+
+  /**
+   * SIGUSR1: TensorFold (0.3.6.2 and 0.5.0 alike) prints every thread's Python stack on stderr. It arms the dump
+   * before it sizes its memory budget, so the budget line is the sign it is safe: before that, SIGUSR1's default
+   * action would end the process.
+   */
+  dumpStacks(): ActionResult {
+    const state = this.manager.state
+    if (state.status !== 'serving' && state.status !== 'loading') return { ok: false, error: 'the server is not running' }
+    if (state.status === 'loading' && !state.info.memoryBudget) {
+      return { ok: false, error: 'not yet: TensorFold arms its stack dump just before its memory budget line, and SIGUSR1 would end it before then' }
+    }
+    if (!state.binary || !signalsReachPython(state.binary)) {
+      return { ok: false, error: `${state.binary ?? 'the binary'} is not a Python entry point, so SIGUSR1 might not reach TensorFold: send it to the Python process yourself (kill -USR1 <pid>)` }
+    }
+    return this.manager.signal('SIGUSR1', 'SIGUSR1 sent: TensorFold prints every thread\'s stack on stderr')
+      ? { ok: true }
+      : { ok: false, error: 'the server is not running' }
+  }
+
+  /** `tensorfold update --check` with the binary in use. The CLI asks GitHub; nothing is installed. */
+  async checkUpdate(): Promise<UpdateCheck> {
+    const binary = await this.binary()
+    if (!binary.path || binary.error) {
+      return { at: Date.now(), ok: false, current: binary.version, latest: null, newer: false, command: 'tensorfold update', notesUrl: null, error: binary.error ?? 'no tensorfold binary', output: '' }
+    }
+    return runUpdateCheck(binary.path, this.opts.env)
   }
 
   async restart(config: ServeConfig): Promise<ActionResult> {

@@ -214,6 +214,14 @@ export class ProcessManager extends EventEmitter<ManagerEvents> {
     return done
   }
 
+  /** Another signal (SIGUSR1: a stack dump), with a note in the log. False when nothing runs. */
+  signal(signal: NodeJS.Signals, note: string): boolean {
+    if (this.state.status === 'stopped' || !this.child) return false
+    this.desk(note)
+    this.child.kill(signal)
+    return true
+  }
+
   /** SIGKILL now. */
   kill(reason = 'asked for'): void {
     if (this.state.status === 'stopped' || !this.child) return

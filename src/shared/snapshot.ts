@@ -11,6 +11,7 @@ import {
   flagValue,
   formatCommandLine,
   renderFlag,
+  type ExtraFlags,
   type ServeConfig
 } from './config'
 import type { HealthMemory } from './health'
@@ -34,6 +35,8 @@ export interface ServingSnapshot {
   argv: string[]
   env: Record<string, string>
   flags: Record<string, SnapshotFlag>
+  /** Flags the app's table lacks that the installed TensorFold took (absent in snapshots made before them). */
+  extraFlags?: ExtraFlags
   checkpoint: { path: string; repo: string | null; sha: string | null; configSha256: string | null }
   drafter: { name: string | null; path: string; repo: string | null; sha: string | null; block: number; bits: number } | null
   serving: {
@@ -47,6 +50,8 @@ export interface ServingSnapshot {
     family: string | null
     modelType: string | null
     lanes: number | null
+    /** 0.4.0+: the longest request (prompt and reply) whose prompt is kept for its next turn. */
+    keptPromptTokens?: number | null
   } | null
   memory: { sentence: string | null; budgetGib: number | null; mlxGib: number | null; ceilingGib: number | null; health: HealthMemory | null }
   machine: { chip: string; memoryGiB: number; os: string }
@@ -105,6 +110,7 @@ export function buildSnapshot(input: {
     argv: state.argv,
     env: buildServeEnv(config),
     flags,
+    extraFlags: { ...(config.extra ?? {}) },
     checkpoint: { path: config.model, ...checkpointRepo(config.model), configSha256: input.configSha256 },
     drafter: info.drafter
       ? { name: drafterName(info), path: info.drafter.path, repo: info.drafter.repo, sha: info.drafter.sha, block: info.drafter.block, bits: info.drafter.bits }
@@ -120,7 +126,8 @@ export function buildSnapshot(input: {
           loadedInS: serving.loadedInS,
           family: info.loading?.family ?? null,
           modelType: info.loading?.modelType ?? null,
-          lanes: info.concurrency?.lanes ?? null
+          lanes: info.concurrency?.lanes ?? null,
+          keptPromptTokens: info.resumable?.tokens ?? null
         }
       : null,
     memory: {
@@ -145,6 +152,7 @@ export function configFromSnapshot(snapshot: ServingSnapshot): ServeConfig {
   }
   const limit = snapshot.env['TENSORFOLD_MEMORY_LIMIT_GB']
   if (limit !== undefined) config.env.memoryLimitGb = Number(limit)
+  if (snapshot.extraFlags && Object.keys(snapshot.extraFlags).length > 0) config.extra = { ...snapshot.extraFlags }
   return config
 }
 

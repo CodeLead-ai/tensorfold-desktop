@@ -77,6 +77,8 @@ export async function captureScreens(win: BrowserWindow, desk: Desk, dirArg: str
   await shoot('log')
 
   await show('settings')
+  await click('Check for a newer release')
+  await until(async () => (await has('.card', 'latest release')) || (await has('.card', 'is out (this is')) || (await has('.card', 'No answer')), 20_000)
   await shoot('settings')
 
   await desk.stop()
