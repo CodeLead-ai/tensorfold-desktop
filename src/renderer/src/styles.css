@@ -167,14 +167,10 @@ textarea {
 }
 
 .brand-mark {
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  background: var(--accent-grad);
-  display: grid;
-  place-items: center;
-  color: #fff;
-  box-shadow: 0 4px 14px rgba(47, 124, 255, 0.35);
+  width: 30px;
+  height: 30px;
+  border-radius: 7px;
+  box-shadow: 0 4px 14px rgba(47, 124, 255, 0.28);
 }
 
 .brand-name {

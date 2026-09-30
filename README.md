@@ -84,6 +84,7 @@ npm run dev:mock
 | `npm run typecheck` / `npm run lint` | TypeScript strict / ESLint. |
 | `npm run screens` | Writes a screenshot of each view against the mock to `docs/screens/`. |
 | `npm run build` | The `.dmg` (see Install). `npm run build:app` only bundles. |
+| `node scripts/make-icon.mjs` | Draws the app icon from code: `build/icon.svg`, `build/icon.png` (1024 px, rendered by Electron), and the window's copy. |
 
 ### The mock
 
@@ -108,6 +109,10 @@ Environment knobs:
 | `MOCK_TENSORFOLD_INTERVAL_MS` | 1500 | Pause between replayed requests; 0 turns the replay off |
 | `MOCK_TENSORFOLD_TOKENS_PER_S` | 60 | Decode speed for real chat requests |
 | `MOCK_TENSORFOLD_FAIL` | | `startup`, `crash`, `slow-stop` or `ignore-sigterm` |
+
+The icon joins the two brands. TensorFold's folded sheet, a mesh with lit nodes, twists once, from its coral and
+violet into CodeLead's blue and cyan. It sits on CodeLead's dark navy tile, over the glowing cursor of CodeLead's
+monogram.
 
 ## How it is built
 

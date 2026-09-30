@@ -1,3 +1,4 @@
+import iconUrl from '../assets/icon.svg'
 import { compact, fixed } from '../lib/format'
 import { useDesk, type ViewId } from '../store'
 import { Icon, type IconName } from './Icon'
@@ -25,9 +26,7 @@ export function Rail(): React.JSX.Element {
   return (
     <nav className="rail">
       <div className="brand">
-        <div className="brand-mark">
-          <Icon name="brand" size={17} />
-        </div>
+        <img className="brand-mark" src={iconUrl} alt="" width={30} height={30} />
         <div>
           <div className="brand-name">TensorFold Desk</div>
           <div className="brand-sub">for tensorfold serve</div>

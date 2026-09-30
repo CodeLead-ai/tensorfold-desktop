@@ -76,6 +76,7 @@ app.on('web-contents-created', (_e, contents) => {
 })
 
 void app.whenReady().then(async () => {
+  if (!app.isPackaged && process.platform === 'darwin') app.dock?.setIcon(join(app.getAppPath(), 'build', 'icon.png'))
   session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
   session.defaultSession.webRequest.onBeforeRequest((details, callback) => {
     const allowed = isAllowedRendererUrl(details.url, devServer)

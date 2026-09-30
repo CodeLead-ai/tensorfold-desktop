@@ -61,3 +61,6 @@ TensorFold 0.3.6.2.
 - Servers the app did not start stay out of scope: such a server shows up only as the port being in use.
 - The LM Studio card shows only while LM Studio is running, which is read from the process list without asking
   `lms`. When LM Studio is not running, "Unload LM Studio, then serve" simply serves.
+- A new app icon: TensorFold's folded sheet twisting from coral and violet into CodeLead's blue and cyan, on CodeLead's
+  navy tile with its cursor. It is drawn from code by `scripts/make-icon.mjs` and used in the rail and, in
+  development, the Dock.
