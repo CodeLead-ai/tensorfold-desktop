@@ -30,3 +30,23 @@ export function lastSegment(line: string): string {
   const segments = body.split('\r').filter((s) => s !== '')
   return segments[segments.length - 1] ?? ''
 }
+
+// Escape codes that start a line over (cursor to column 1, erase line, hide cursor before a spinner frame).
+// eslint-disable-next-line no-control-regex -- matching terminal escape codes is the point
+const REDRAW = /\x1b\[\d*G|\x1b\[[012]?K|\x1b\[\?25l/g
+// Every other terminal control sequence (CSI and OSC).
+// eslint-disable-next-line no-control-regex -- matching terminal escape codes is the point
+const CONTROL = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g
+
+/**
+ * Command output as a person reads it: terminal escape codes removed, and a line redrawn in place (a spinner,
+ * a progress bar) reduced to its last state.
+ */
+export function cleanTerminalOutput(text: string): string {
+  return text
+    .replace(REDRAW, '\r')
+    .replace(CONTROL, '')
+    .split('\n')
+    .map(lastSegment)
+    .join('\n')
+}

@@ -8,6 +8,7 @@ import { accessSync, constants, statSync } from 'node:fs'
 import { delimiter, dirname, join } from 'node:path'
 import { parseLmsPs, type CommandResult, type LmStudioStatus } from '@shared/lmstudio'
 import { shellQuote } from '@shared/config'
+import { cleanTerminalOutput } from './lines'
 import { isScript } from './ProcessManager'
 
 function isExecutable(path: string): boolean {
@@ -91,7 +92,7 @@ export class LmStudio {
     }
     return new Promise((resolve) => {
       execFile('/bin/sh', ['-c', line], { env, timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024 }, (error, stdout, stderr) => {
-        const output = `${stdout}${stderr}`.slice(-64 * 1024)
+        const output = cleanTerminalOutput(`${stdout}${stderr}`).slice(-64 * 1024)
         const code = error ? (typeof error.code === 'number' ? error.code : null) : 0
         resolve({ ok: !error, command: text, code, output, error: error ? (error.killed ? 'timed out' : `exit ${code ?? error.message}`) : null })
       })

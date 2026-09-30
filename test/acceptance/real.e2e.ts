@@ -10,6 +10,10 @@
  * The second run passes --snapshot-dir <tmp>/prefix-snapshots. TensorFold keeps conversation snapshots in the
  * sibling session-snapshots folder, so the probe's conversation stays in the temporary folder and never reaches
  * ~/.cache/tensorfold. The run checks the flag reached the server before it sends the probe.
+ *
+ * §6.5 runs only when asked, since it unloads LM Studio's model and reloads it:
+ *   TFDESK_REAL_LMS=1 TFDESK_RESTORE_COMMAND='<your reload command>' npx vitest run -c vitest.real.config.ts -t 6.5
+ * It needs LM Studio running with a model loaded and idle, and port 8080 free.
  */
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
@@ -26,6 +30,8 @@ declare const window: { tfdesk: DeskApi }
 
 const MODEL = join(homedir(), '.lmstudio/models/lmstudio-community/Qwen3.8-27B-MLX-8bit')
 const available = existsSync(join(MODEL, 'config.json'))
+const lmsRun = process.env['TFDESK_REAL_LMS'] === '1'
+const restoreCommand = process.env['TFDESK_RESTORE_COMMAND'] ?? ''
 
 let app: ElectronApplication
 let page: Page
@@ -78,9 +84,13 @@ async function lmStudioIsEmpty(): Promise<void> {
 
 /** Start, and wait for serving; a death while loading fails at once with the server's last lines. */
 async function startAndServe(): Promise<ServerState> {
+  return serveAfter(() => button(header(), 'Start').click())
+}
+
+async function serveAfter(click: () => Promise<void>): Promise<ServerState> {
   const before = (await session()).state.sessionId
   const t0 = Date.now()
-  await button(header(), 'Start').click()
+  await click()
   for (;;) {
     const { state } = await session()
     if (state.sessionId !== before && state.status === 'serving') {
@@ -204,5 +214,64 @@ describe.skipIf(!available)('SPEC §6 against the real server', () => {
     await header().locator('text=exit 0').waitFor({ timeout: 120_000 })
     const kept = existsSync(join(work, 'session-snapshots')) ? 'in the test folder' : 'nowhere (none saved)'
     log(`the probe's conversation snapshot: ${kept}`)
+  })
+
+  it.skipIf(!lmsRun)('§6.5: without lms, a clear message; with it, unload LM Studio then serve, and stop then restore', async () => {
+    expect(restoreCommand, 'set TFDESK_RESTORE_COMMAND').not.toBe('')
+    const card = page.locator('section.card:has(h2:text-is("LM Studio"))')
+    const setting = async (label: string, value: string): Promise<void> => {
+      await rail(/Settings/).click()
+      const input = page.locator(`label.field:has(span:text-is("${label}")) input`)
+      await input.fill(value)
+      await input.press('Tab')
+      await page.waitForTimeout(300)
+    }
+
+    // No lms: the card says so, and offers nothing to run.
+    await setting('lms', '/nonexistent/lms')
+    await rail(/Server/).click()
+    await card.locator("text=LM Studio's lms was not found").waitFor({ timeout: 20_000 })
+    log('without lms:', (await card.locator('.issue').innerText()).replace(/\s+/g, ' '))
+
+    // The real lms, and the restore command.
+    await setting('lms', '')
+    await setting('Restore command', restoreCommand)
+    await rail(/Server/).click()
+    await card.locator('table td').first().waitFor({ timeout: 30_000 })
+    const before = await page.evaluate(() => window.tfdesk.lmStudioStatus())
+    const describe = (s: typeof before): string => s.models.map((m) => `${m.identifier} (${m.status}, ctx ${m.contextLength})`).join(', ') || 'nothing loaded'
+    log('LM Studio before:', describe(before))
+    expect(before.models.length, 'LM Studio has no model to unload').toBeGreaterThan(0)
+    expect(before.models.filter((m) => m.status === 'generating'), 'LM Studio is busy').toEqual([])
+    // Never unload a model that is generating: the app asks first, and this test says no.
+    page.on('dialog', (dialog) => void dialog.dismiss())
+
+    const unloadAt = Date.now()
+    const serving = await serveAfter(() => button(card, 'Unload LM Studio, then serve').click())
+    const unloaded = await page.evaluate(() => window.tfdesk.lmStudioStatus())
+    log(`unloaded and serving after ${((Date.now() - unloadAt) / 1000).toFixed(1)} s; LM Studio now: ${describe(unloaded)}`)
+    expect(unloaded.models).toEqual([])
+    expect(serving.commandLine).toMatch(/--port 8080 --context 89600 --reasoning-effort medium --no-update-check$/)
+    log('unload step:', (await card.innerText()).replace(/\s+/g, ' ').slice(0, 400))
+
+    const restoreAt = Date.now()
+    await button(card, 'Stop, then restore').click()
+    let restored: typeof unloaded
+    for (;;) {
+      const s = await session()
+      restored = await page.evaluate(() => window.tfdesk.lmStudioStatus())
+      const done = await card.locator('.tag.ok, .tag.bad').filter({ hasText: /ok|exit|timed out|failed/ }).count()
+      if (s.state.status === 'stopped' && restored.models.length > 0 && done > 0) {
+        log(`stopped (exit ${s.state.lastExit?.code}) and restored after ${((Date.now() - restoreAt) / 1000).toFixed(1)} s; LM Studio now: ${describe(restored)}`)
+        expect(s.state.lastExit).toMatchObject({ code: 0, requested: true })
+        break
+      }
+      if (Date.now() - restoreAt > 15 * 60_000) throw new Error(`not restored after 15 minutes (${s.state.status}; ${describe(restored)})`)
+      await page.waitForTimeout(2000)
+    }
+    const output = (await card.locator('pre.lines-box').last().innerText().catch(() => '')).split('\n').slice(-20).join('\n')
+    log(`restore command output (last lines):\n${output}`)
+    expect(await card.locator('.tag.ok').count()).toBeGreaterThan(0)
+    expect(restored.models.map((m) => m.identifier)).toEqual(before.models.map((m) => m.identifier))
   })
 })

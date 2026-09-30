@@ -166,9 +166,22 @@ model. It fails at once when the server dies while loading, and checks that the 
 - Around the run: a regression queue's idle server on 8080 was stopped with SIGTERM (exit clean in 2 s) and
   restarted afterwards with the same command, from the same folder, into the same log.
 
+**2026-09-30 09:42: §6.5 against the real LM Studio passes** (`TFDESK_REAL_LMS=1 TFDESK_RESTORE_COMMAND='…'`,
+run with `-t 6.5`).
+- **Without `lms`:** with its path set to a missing file, the LM Studio card says "LM Studio's lms was not found
+  (looked at /nonexistent/lms). Set its path in Settings, or start the server without unloading."
+- **Unload, then serve:** LM Studio held `qwen/qwen3.8-27b` (idle, context 131072). "Unload LM Studio, then serve"
+  ran `lms unload --all` ("Unloaded 1 model."). LM Studio then listed nothing, and the endorsed preset was
+  serving 25.4 s after the click.
+- **Stop, then restore:** the server stopped (exit 0) and `cd /Users/peter/Projects/codelead-bench &&
+  ./reload-model.sh` ran. It reloaded the model in 7.75 s against its reference configuration
+  (`testdebt-2026-09-10a-serving-config.json`) and printed "MATCH — configuration reproduced; series stays
+  comparable". LM Studio listed the model again 15.4 s after the click. The reload restores the reference
+  configuration, parallel 1; before the test the model was loaded at parallel 4.
+- **Cleaned output:** the script's spinner reached the card as raw terminal escape codes. Command output is now
+  cleaned: the codes are removed, and a redrawn line shows only its last state.
+
 **Not run:**
-- §6.5 with the real `lms`, which would unload LM Studio's model. The flow is tested end to end against
-  `mock/fake-lms.mjs`.
 - A real `pull`, so huggingface.co from the CLI child (§6.8) was not observed.
 
 ## Decisions (2026-09-29)

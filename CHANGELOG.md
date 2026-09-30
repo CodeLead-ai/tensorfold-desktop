@@ -64,3 +64,6 @@ TensorFold 0.3.6.2.
 - A new app icon: TensorFold's folded sheet twisting from coral and violet into CodeLead's blue and cyan, on CodeLead's
   navy tile with its cursor. It is drawn from code by `scripts/make-icon.mjs` and used in the rail and, in
   development, the Dock.
+- Command output (LM Studio's unload and restore) shows without terminal escape codes, and a redrawn spinner shows only
+  its last state.
+- §6.5 passes against the real LM Studio: an opt-in step of `npm run test:real`.
