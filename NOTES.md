@@ -148,6 +148,24 @@ conversation to `~/.cache/tensorfold/session-snapshots/75dda8dd1589a00d3dc8cee3a
 model. It fails at once when the server dies while loading, and checks that the running command has its
 `--snapshot-dir` before any request.
 
+**2026-09-30 09:26–09:31: the final code, rerun.**
+- §6.3, §6.4, §6.6, §6.8 pass. The probe measured 58.98 s to the first token, the same as the server's `done`
+  line, and 44.5 tok/s against 44.5. The gauge rose from 31.08 GiB during the prefill. The access line arrived 18 ms
+  after the click. The window made 4 requests, all to its own files. The probe's conversation was saved in the
+  test's own folder.
+- §6.1 passes (serving after 24.2 s, exit 0 on stop), but only on the second try. The first start was refused by
+  TensorFold itself:
+  ```
+  tensorfold: a 89,600-token context window does not fit this server's memory budget: the most one request can use is 89,355 tokens (prompt plus reply)
+  ```
+  TensorFold sizes the window from the new process's own MLX memory at startup (`largest_window` in
+  `server/prompt_memory.py`). The endorsed `--context 89600` sits within about 30 MB of what this Mac affords, so a
+  start can fail on a small variation, 245 tokens short in this case. Three more starts with the same flags that
+  morning succeeded. If it recurs, three options: `TENSORFOLD_MEMORY_LIMIT_GB` (the startup line says up to 51.8),
+  a slightly smaller `--context`, or omitting `--context` so TensorFold fits the window itself.
+- Around the run: a regression queue's idle server on 8080 was stopped with SIGTERM (exit clean in 2 s) and
+  restarted afterwards with the same command, from the same folder, into the same log.
+
 **Not run:**
 - §6.5 with the real `lms`, which would unload LM Studio's model. The flow is tested end to end against
   `mock/fake-lms.mjs`.
