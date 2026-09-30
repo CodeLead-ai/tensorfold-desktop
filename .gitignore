@@ -7,3 +7,15 @@ coverage/
 *.tsbuildinfo
 .eslintcache
 .DS_Store
+
+# TensorFold and app output: model and conversation snapshots, session logs,
+# exported serving snapshots, packaged apps. Big and machine-specific.
+*.safetensors
+!mock/**/*.safetensors
+session-snapshots/
+prefix-snapshots/
+*.log
+/logs/
+serving-*.json
+*.dmg
+*.blockmap
