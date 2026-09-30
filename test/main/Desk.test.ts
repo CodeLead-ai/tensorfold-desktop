@@ -94,7 +94,8 @@ describe('Desk with the mock', () => {
 describe('P1 against the mock', () => {
   const mockRoots = [join(ROOT, 'mock/models'), join(ROOT, 'mock/hf-cache/hub')]
   const fakeLms = join(ROOT, 'mock/fake-lms.mjs')
-  const lmsState = (): Record<string, string> => ({ FAKE_LMS_STATE: join(mkdtempSync(join(tmpdir(), 'tfdesk-lms-')), 'state.json') })
+  // Inside logDir, which afterAll removes.
+  const lmsState = (): Record<string, string> => ({ FAKE_LMS_STATE: join(mkdtempSync(join(logDir, 'lms-')), 'state.json') })
 
   it('scans the checkpoint folders and asks tensorfold info about each', async () => {
     const d = desk({ checkpointRoots: mockRoots })
