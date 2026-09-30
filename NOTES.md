@@ -140,8 +140,9 @@ empty. It drives the app through its UI.
 - §6.6: the exported snapshot reproduced the command line.
 - §6.8: the window made 3 requests, all to its own files.
 
-**What the 15:11 run left behind.** In it, the server was started twice. The session that served the probe was
-spawned 43 s after the test's click, without the test's `--snapshot-dir`. So TensorFold saved the probe's
+**What the 15:11 run left behind.** In it, the server was started twice. The first start died for lack of memory:
+LM Studio still held `qwen/qwen3.8-27b` (29.5 GB). The session that served the probe was started again 43 s later,
+after that memory was freed, and without the test's `--snapshot-dir`. So TensorFold saved the probe's
 conversation to `~/.cache/tensorfold/session-snapshots/75dda8dd1589a00d3dc8cee3acfe9853.safetensors` (2.57 GB,
 15:13:57) and pruned an older conversation (item 17). The test now refuses to run while LM Studio holds a
 model. It fails at once when the server dies while loading, and checks that the running command has its

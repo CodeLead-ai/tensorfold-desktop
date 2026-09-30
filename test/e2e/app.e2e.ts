@@ -54,7 +54,8 @@ describe('the app against the mock', () => {
     await model.fill(join(ROOT, 'mock/models/lmstudio-community/Muse-Glimmer-30B-GGUF'))
     await page.locator('.issue.error:has-text("no config.json")').waitFor()
     await model.fill(good)
-    await page.locator('.issue.error').waitFor({ state: 'detached' })
+    // Only this error: another server on 8080 (a real one, say) adds its own port error, which is right.
+    await page.locator('.issue.error:has-text("no config.json")').waitFor({ state: 'detached' })
   })
 
   it('serves, streams requests, tracks memory, and stops with exit code 0', async () => {

@@ -41,13 +41,16 @@ login shell's `PATH`, then in any virtualenv folder under `~/Projects/*/` or `~`
 | **Log** | The raw stream from stdout and stderr, plus the app's own notes. Follow mode, filter, copy. The app's own `/health` polls are hidden unless you show them. |
 | **Settings** | The binary; checkpoint folders; LM Studio's `lms` and the unload and restore commands; the stop grace period; the `/health` interval; the theme; and a network audit of the window. |
 
+The app watches the servers it starts. A server started elsewhere, such as by a bench runner script, shows up
+only as the port being in use; the app names the model it serves.
+
 A menu-bar item shows the state as a dot and the last request's tok/s. Its menu can start and stop the server.
 Closing the window keeps the app, and its server, running. Quitting asks before it stops a running server.
 
 Files live in `~/Library/Application Support/TensorFold Desk/`:
 
 - `settings.json`
-- `logs/<start-stamp>.log`: the app's copy of each session's log
+- `logs/<start-stamp>.log`: the app's copy of each session's log (the newest 50 are kept; see Settings)
 - `snapshots/serving-<start-stamp>.json`: exported serving configurations
 - `cache/checkpoint-info.json`: cached `tensorfold info` answers
 
@@ -62,6 +65,7 @@ Files live in `~/Library/Application Support/TensorFold Desk/`:
 | Restore command | empty | Runs after "Stop, then restore", through `/bin/sh`. On Peter's Mac this would be the bench's reload script, for example `/Users/peter/Projects/codelead-bench/reload-model.sh`. The app ships with no CodeLead path. |
 | Stop grace period | 30 s | SIGTERM first; SIGKILL only if the server is still alive after this. TensorFold saves its newest conversations while it stops, and a SIGKILL loses them. |
 | `/health` interval | 2000 ms | Backs off while the server does not answer. |
+| Session logs to keep | 50 | The app writes one log per server session. When a session starts, the oldest beyond this number are deleted, and lowering the number deletes the extra ones at once. 0 keeps them all. Only the app's own session logs are ever deleted. |
 
 ## Develop
 

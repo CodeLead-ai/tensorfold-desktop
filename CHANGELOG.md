@@ -48,3 +48,14 @@ TensorFold 0.3.6.2.
 - `npm run build` writes an ad-hoc-signed arm64 `.dmg`, with an app icon drawn by `scripts/make-icon.mjs`.
 - README with install, the mock workflow and the settings. `npm run test:real` is the opt-in acceptance run
   against the real server.
+
+### After the first build
+- Checkpoints: a family with only a CUDA engine is not servable on a Mac, although `tensorfold info` exits 0 for
+  it. Long checkpoint names no longer push the Serve button out of the card.
+- Switching views starts at the top, not where the previous view was scrolled.
+- Clicking a flag's name no longer clears it. The label handed the click to the reset button.
+- The real-server acceptance test runs only while LM Studio is empty, fails at once on a death while loading, and
+  checks its `--snapshot-dir` before any request. It writes `.tmp/acceptance.log`.
+- `.gitignore` covers TensorFold snapshots, session logs, exported snapshots and dmgs.
+- A cap on the app's session logs: the newest 50 by default, set in Settings, with the logs' count and size shown.
+- Servers the app did not start stay out of scope: such a server shows up only as the port being in use.

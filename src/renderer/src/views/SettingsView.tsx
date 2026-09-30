@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
-import type { AuditEntry } from '@shared/api'
+import type { AuditEntry, LogsInfo } from '@shared/api'
 import type { Theme } from '@shared/settings'
 import { Field, NumberInput, Segmented } from '../components/Fields'
 import { Icon } from '../components/Icon'
-import { clock } from '../lib/format'
+import { bytes, clock } from '../lib/format'
 import { useDesk } from '../store'
 
 export function SettingsView(): React.JSX.Element {
@@ -87,6 +87,10 @@ export function SettingsView(): React.JSX.Element {
             <Field label={<span>/health every (ms)</span>} help="How often the memory gauge reads GET /health while serving (it backs off when the server does not answer).">
               <NumberInput value={settings.healthIntervalMs} onChange={(v) => typeof v === 'number' && v >= 500 && void saveSettings({ healthIntervalMs: v })} />
             </Field>
+            <Field label={<span>Session logs to keep</span>} help="The app writes one log per server session; older ones are deleted when a session starts. 0 keeps them all.">
+              <NumberInput value={settings.keepLogs} onChange={(v) => typeof v === 'number' && Number.isInteger(v) && v >= 0 && void saveSettings({ keepLogs: v })} />
+            </Field>
+            <LogsLine keep={settings.keepLogs} />
           </div>
         </div>
       </section>
@@ -236,5 +240,31 @@ function AuditCard(): React.JSX.Element {
         )}
       </div>
     </section>
+  )
+}
+
+/** How many session logs there are and where, refreshed when the cap changes. */
+function LogsLine({ keep }: { keep: number }): React.JSX.Element {
+  const [info, setInfo] = useState<LogsInfo | null>(null)
+  useEffect(() => {
+    void window.tfdesk.logsInfo().then(setInfo)
+  }, [keep])
+  return (
+    <div className="field">
+      <span className="field-label">Session logs</span>
+      {info?.dir ? (
+        <span className="row wrap" style={{ gap: 8 }}>
+          <span className="mono" style={{ fontSize: 12.5 }}>
+            {info.files} {info.files === 1 ? 'file' : 'files'}, {bytes(info.bytes)}
+          </span>
+          <button className="btn small" onClick={() => void window.tfdesk.reveal(info.dir as string)}>
+            <Icon name="folder" size={12} /> Show
+          </button>
+        </span>
+      ) : (
+        <span className="muted">not written</span>
+      )}
+      <span className="field-help mono">{info?.dir ?? ''}</span>
+    </div>
   )
 }

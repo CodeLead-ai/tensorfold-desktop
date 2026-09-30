@@ -5,7 +5,7 @@
 import { EventEmitter } from 'node:events'
 import { existsSync, statSync } from 'node:fs'
 import { join } from 'node:path'
-import type { ActionResult, BinaryInfo, ServerState, SessionSnapshot, SnapshotResult, StepsResult } from '@shared/api'
+import type { ActionResult, BinaryInfo, LogsInfo, ServerState, SessionSnapshot, SnapshotResult, StepsResult } from '@shared/api'
 import type { CheckpointScan } from '@shared/checkpoints'
 import { buildServeArgv, buildServeEnv, formatCommandLine, type ServeConfig } from '@shared/config'
 import type { LogLine } from '@shared/events'
@@ -19,6 +19,7 @@ import { hasErrors, looksLikePath, validateConfig, type ValidationIssue } from '
 import { findBinary } from './binary'
 import { Checkpoints } from './Checkpoints'
 import { LmStudio } from './LmStudio'
+import { logStats, pruneLogs } from './logRetention'
 import { runProbe } from './Probe'
 import { Puller } from './Pull'
 import { writeSnapshot } from './SnapshotWriter'
@@ -71,7 +72,7 @@ export class Desk extends EventEmitter<DeskEvents> {
   constructor(private readonly opts: DeskOptions) {
     super()
     const settings = opts.settings.get()
-    this.manager = new ProcessManager({ logDir: opts.logDir, env: opts.env, stopGraceMs: settings.stopGraceSeconds * 1000 })
+    this.manager = new ProcessManager({ logDir: opts.logDir, keepLogs: settings.keepLogs, env: opts.env, stopGraceMs: settings.stopGraceSeconds * 1000 })
     this.health = new HealthPoller({ intervalMs: settings.healthIntervalMs })
     this.manager.on('state', (state) => {
       this.followHealth(state)
@@ -93,6 +94,8 @@ export class Desk extends EventEmitter<DeskEvents> {
     const next = this.opts.settings.set(patch)
     this.manager.setStopGrace(next.stopGraceSeconds * 1000)
     this.health.setInterval(next.healthIntervalMs)
+    this.manager.setKeepLogs(next.keepLogs)
+    if (this.opts.logDir) pruneLogs(this.opts.logDir, next.keepLogs, this.manager.state.logFile)
     this.emit('settings', next)
     return next
   }
@@ -254,6 +257,11 @@ export class Desk extends EventEmitter<DeskEvents> {
 
   runnerLines(): string | null {
     return runnerLines(this.manager.state)
+  }
+
+  logsInfo(): LogsInfo {
+    const dir = this.opts.logDir
+    return { dir, ...(dir ? logStats(dir) : { files: 0, bytes: 0 }), keep: this.settings.keepLogs }
   }
 
   dispose(): void {

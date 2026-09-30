@@ -30,6 +30,8 @@ export interface Settings {
   /** SIGTERM, then SIGKILL after this many seconds (TensorFold saves conversations while it stops). */
   stopGraceSeconds: number
   healthIntervalMs: number
+  /** Session logs kept in <userData>/logs, the newest; 0 keeps them all. */
+  keepLogs: number
   /** The server form, as last edited. */
   lastConfig: ServeConfig
   probe: ProbeSettings
@@ -50,6 +52,7 @@ export function defaultSettings(home: string): Settings {
     restoreCommand: '',
     stopGraceSeconds: 30,
     healthIntervalMs: 2000,
+    keepLogs: 50,
     lastConfig: config,
     probe: {
       prompt: 'In three sentences, explain what a draft model does in speculative decoding.',
@@ -89,6 +92,7 @@ export function sanitizeSettings(raw: unknown, defaults: Settings): Settings {
     restoreCommand: text(r['restoreCommand'], defaults.restoreCommand),
     stopGraceSeconds: clampNumber(r['stopGraceSeconds'], defaults.stopGraceSeconds, 1, 600),
     healthIntervalMs: clampNumber(r['healthIntervalMs'], defaults.healthIntervalMs, 500, 60_000),
+    keepLogs: Math.round(clampNumber(r['keepLogs'], defaults.keepLogs, 0, 100_000)),
     lastConfig: configOk ? (lastConfig as ServeConfig) : defaults.lastConfig,
     probe: {
       prompt: text(probe['prompt'], defaults.probe.prompt),

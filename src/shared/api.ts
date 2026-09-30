@@ -94,6 +94,14 @@ export interface SessionSnapshot {
   logDir: string | null
 }
 
+/** The session logs in <userData>/logs, and the cap on them. */
+export interface LogsInfo {
+  dir: string | null
+  files: number
+  bytes: number
+  keep: number
+}
+
 export type Unsubscribe = () => void
 
 export interface DeskApi {
@@ -132,6 +140,7 @@ export interface DeskApi {
   /** CODELEAD_BASE_URL and CODELEAD_MODEL lines, or null when nothing is serving. */
   runnerLines(): Promise<string | null>
   networkAudit(): Promise<AuditEntry[]>
+  logsInfo(): Promise<LogsInfo>
 }
 
 export const CHANNELS = {
@@ -163,5 +172,6 @@ export const CHANNELS = {
   probe: 'probe:run',
   exportSnapshot: 'snapshot:export',
   runnerLines: 'snapshot:runner',
-  networkAudit: 'audit:list'
+  networkAudit: 'audit:list',
+  logsInfo: 'logs:info'
 } as const

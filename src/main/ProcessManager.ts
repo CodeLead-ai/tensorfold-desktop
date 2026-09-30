@@ -15,12 +15,15 @@ import type { LogLine, LogStream } from '@shared/events'
 import { applyEvent, emptySessionInfo } from '@shared/session'
 import { parseLine } from './LogParser'
 import { LineSplitter } from './lines'
+import { pruneLogs } from './logRetention'
 
 export const LAST_LINES = 50
 
 export interface ProcessManagerOptions {
   /** Where each session's log copy goes; null: no copy. */
   logDir: string | null
+  /** Session logs kept in logDir, the newest; 0 or absent keeps them all. */
+  keepLogs?: number
   /** The environment children start from (the login shell's). */
   env: NodeJS.ProcessEnv
   /** SIGTERM, then SIGKILL after this long. TensorFold saves conversations while it stops. */
@@ -116,6 +119,10 @@ export class ProcessManager extends EventEmitter<ManagerEvents> {
     this.opts.stopGraceMs = ms
   }
 
+  setKeepLogs(keep: number): void {
+    this.opts.keepLogs = keep
+  }
+
   start({ binary, config, version = null }: StartOptions): void {
     if (this.state.status !== 'stopped') throw new Error(`the server is already ${this.state.status}`)
     const argv = buildServeArgv(config)
@@ -136,6 +143,7 @@ export class ProcessManager extends EventEmitter<ManagerEvents> {
       logFile = join(this.opts.logDir, `${stamp(startedAt)}.log`)
       this.logStream = createWriteStream(logFile, { flags: 'a' })
       this.logStream.on('error', () => (this.logStream = null))
+      pruneLogs(this.opts.logDir, this.opts.keepLogs ?? 0, logFile)
     }
     this.setState({
       status: 'loading',

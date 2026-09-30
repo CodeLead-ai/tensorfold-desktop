@@ -28,6 +28,7 @@ export function registerIpc(desk: Desk, audit: NetworkAudit): void {
   ipcMain.handle(CHANNELS.exportSnapshot, () => desk.exportSnapshot())
   ipcMain.handle(CHANNELS.runnerLines, () => desk.runnerLines())
   ipcMain.handle(CHANNELS.networkAudit, () => audit.list())
+  ipcMain.handle(CHANNELS.logsInfo, () => desk.logsInfo())
 
   ipcMain.handle(CHANNELS.getSession, () => desk.session())
   ipcMain.handle(CHANNELS.start, (_e, config: ServeConfig) => desk.start(config))
