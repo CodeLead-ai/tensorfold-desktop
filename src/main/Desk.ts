@@ -26,7 +26,7 @@ import { runProbe } from './Probe'
 import { Puller } from './Pull'
 import { writeSnapshot } from './SnapshotWriter'
 import { HealthPoller, healthBase } from './HealthPoller'
-import { describePortOwner, isPortFree } from './ports'
+import { describePortOwner, isPortAvailable } from './ports'
 import { ProcessManager } from './ProcessManager'
 import type { SettingsStore } from './Settings'
 import { runUpdateCheck } from './UpdateCheck'
@@ -168,7 +168,7 @@ export class Desk extends EventEmitter<DeskEvents> {
     const port = normalized.endpoint.port ?? 8080
     const host = normalized.endpoint.host || '127.0.0.1'
     const ours = this.manager.running && (this.manager.state.config?.endpoint.port ?? 8080) === port
-    if (!ours && Number.isInteger(port) && port > 0 && port < 65536 && !(await isPortFree(port, host))) {
+    if (!ours && Number.isInteger(port) && port > 0 && port < 65536 && !(await isPortAvailable(port, host))) {
       issues.push({ field: 'endpoint.port', message: await describePortOwner(port, host), severity: 'error' })
     }
     return issues

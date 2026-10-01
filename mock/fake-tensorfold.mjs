@@ -26,6 +26,8 @@
  *   MOCK_TENSORFOLD_TOKENS_PER_S decode speed for real chat requests (default 60)
  *   MOCK_TENSORFOLD_PULL_STEP_MS progress step of `pull` (default 400)
  *   MOCK_TENSORFOLD_MEMORY       pressure: the replay's streams wait for memory, and one ends (0.4.0+'s lines)
+ *   MOCK_TENSORFOLD_LOOPBACK_ONLY 1: listen on 127.0.0.1 even when --host asks for more (tests of the remote switch
+ *                                that should not open a port to the network); the serving line still says --host
  *   MOCK_TENSORFOLD_FAIL         startup | crash | slow-stop | ignore-sigterm
  * A model path containing "broken" fails at startup too.
  */
@@ -57,6 +59,7 @@ const TOKENS_PER_S = envNumber('MOCK_TENSORFOLD_TOKENS_PER_S', 60)
 const PULL_STEP_MS = envNumber('MOCK_TENSORFOLD_PULL_STEP_MS', 400)
 const FAIL = process.env.MOCK_TENSORFOLD_FAIL ?? ''
 const MEMORY_PRESSURE = process.env.MOCK_TENSORFOLD_MEMORY === 'pressure'
+const LOOPBACK_ONLY = process.env.MOCK_TENSORFOLD_LOOPBACK_ONLY === '1'
 
 const out = (line) => process.stdout.write(`${line}\n`)
 const err = (line) => process.stderr.write(`${line}\n`)
@@ -417,7 +420,7 @@ async function serve(args) {
     pythonTraceback(`OSError: ${e.message}`)
     exit(1)
   })
-  await new Promise((resolve) => server.listen(opts.port, opts.host, resolve))
+  await new Promise((resolve) => server.listen(opts.port, LOOPBACK_ONLY ? '127.0.0.1' : opts.host, resolve))
   out(
     servingLine
       .replace(/serving \S+ at http:\/\/\S+?\/v1/, `serving ${served} at http://${opts.host}:${opts.port}/v1`)

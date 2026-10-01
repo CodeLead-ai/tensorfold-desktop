@@ -250,11 +250,26 @@ know (fixed above).
   - Requests up to 49,664 tokens, reply included, keep their prompt for the next turn. CodeLead's 20–27k-token prompts
     are within it.
 
+**2026-10-01 10:27–10:31: 0.5.0 again, with the remote step** (`TFDESK_REAL_REMOTE=1 npm run test:real`): 3 passed,
+§6.5 skipped.
+- Every stdout line of the four sessions was known.
+- `update --check` found 0.6.0. The bench's venv was not upgraded.
+- The probe matched its `done` line: 58.24 s to the first token, and a prefill of 632 tok/s.
+- **Remote:**
+  - With the switch on, `GET http://10.0.0.157:8080/v1/models` (en0) answered 200. The header showed "remote
+    Peters-MacBook-Pro.local:8080".
+  - With the switch off and the server restarted, 10.0.0.157 refused the connection (`ECONNREFUSED`) and 127.0.0.1
+    answered 200.
+- **An earlier run that morning (10:15) passed the same three tests, then hung on quit:** the app sat in a native
+  alert, the kind Electron shows for an uncaught exception in the main process. Three more runs did not reproduce it:
+  this one, the remote step alone against the real server, and the same steps against the mock. The test now logs the
+  main process's stderr and any uncaught exception in `.tmp/acceptance.log`, and kills an app that does not quit in
+  20 s.
+
 **Not run:**
 - A real `pull`, so huggingface.co from the CLI child (§6.8) was not observed.
-- The acceptance run on 0.5.0 after the `[lanes]` fix. The fix is tested on the recorded lines.
 
-## Decisions (2026-09-29, 2026-09-30)
+## Decisions (2026-09-29 to 2026-10-01)
 
 - **The form follows the installed binary.** The app reads `serve --help` once per binary and version, about 50 ms.
   A flag the binary lacks is dimmed with the release that added it ("tensorfold 0.3.6.2 has no --min-p (it came in
@@ -263,6 +278,18 @@ know (fixed above).
 - **The update check runs only when asked,** from Settings: `tensorfold update --check`, whose request to
   api.github.com is the CLI's. The app never installs. It shows `tensorfold update` to copy, because an upgrade
   changes the environment a bench runs in.
+- **Remote connections are a switch (2026-10-01).** On passes `--host 0.0.0.0` after a confirmation, a native
+  dialog with Cancel as the default. The dialog says there is no password or API key, no encryption, and that the
+  macOS firewall may ask the first time. Off drops `--host`. `--host` is not part of a preset: it carries across presets
+  like the environment, and `presetOf` ignores it. A network address typed into the `--host` field keeps its
+  validation warning instead of the dialog. While a server listens beyond this Mac, the header and the Command card
+  show the address other machines use: the Bonjour name (`os.hostname()`), then the IPv4 addresses, Wi-Fi and
+  Ethernet first.
+- **The port check connects as well as binds.** macOS lets a server bind `0.0.0.0:8080` while another holds
+  `127.0.0.1:8080`, and Python's servers do. With the switch on, a bind-only check would have let the app start a
+  second 27B server beside one a bench script started. The check now first tries to connect to `127.0.0.1:port`,
+  where a server on either address answers. It never binds `0.0.0.0` itself, so it sets off no firewall prompt for the
+  app.
 - **"Dump stacks" sends SIGUSR1** only once the memory budget line is out, since TensorFold arms the dump just
   before it and the signal would end the process earlier. It is sent only when the binary is a Python entry point,
   which the venv's is. A shell wrapper that does not exec Python would take the signal itself.

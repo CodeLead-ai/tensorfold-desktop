@@ -58,10 +58,16 @@ describe('validateConfig', () => {
     expect(fields({ ...emptyConfig(MODEL), drafting: { spillGib: 8, snapshotDir: 'none' } })).toEqual(['drafting.spillGib'])
   })
 
-  it('warns, without blocking, about NVIDIA flags on a Mac and a network-wide host', () => {
-    const issues = validateConfig({ ...emptyConfig(MODEL), endpoint: { host: '0.0.0.0' }, nvidia: { tp: 2 } })
+  it('warns, without blocking, about NVIDIA flags on a Mac and a network address typed as the host', () => {
+    const issues = validateConfig({ ...emptyConfig(MODEL), endpoint: { host: '10.0.0.157' }, nvidia: { tp: 2 } })
     expect(hasErrors(issues)).toBe(false)
     expect(issues.map((i) => i.field).sort()).toEqual(['endpoint.host', 'nvidia.tp'])
     expect(validateConfig({ ...emptyConfig(MODEL), nvidia: { tp: 2 } }, 'linux')).toEqual([])
+  })
+
+  it('leaves the remote-connections switch (--host 0.0.0.0) to its own confirmation, and this Mac alone unwarned', () => {
+    for (const host of ['0.0.0.0', '127.0.0.1', 'localhost', '::1']) {
+      expect(validateConfig({ ...emptyConfig(MODEL), endpoint: { host } }), host).toEqual([])
+    }
   })
 })

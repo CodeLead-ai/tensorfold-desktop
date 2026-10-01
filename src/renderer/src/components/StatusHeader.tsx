@@ -1,3 +1,4 @@
+import { remoteUrls } from '@shared/remote'
 import { drafterName, lanesOf } from '@shared/session'
 import { basename, duration, int } from '../lib/format'
 import { useNow } from '../lib/hooks'
@@ -10,6 +11,7 @@ export function StatusHeader(): React.JSX.Element {
   const health = useDesk((s) => s.health)
   const form = useDesk((s) => s.form)
   const busy = useDesk((s) => s.busy)
+  const addresses = useDesk((s) => s.addresses)
   const { start, stop, restart, kill } = useDesk.getState()
   const now = useNow(1000)
   const { status, info } = server
@@ -30,6 +32,7 @@ export function StatusHeader(): React.JSX.Element {
   const lanes = lanesOf(info, maxBatch)
   const sampling = serving ? (serving.greedy ? 'greedy' : Object.entries(serving.sampling).map(([k, v]) => `${k.replace('temperature', 'T').replace('top_k', 'k').replace('top_p', 'p').replace('min_p', 'min p')} ${v}`).join(' · ')) : null
   const waiting = status === 'serving' && info.memoryWait && info.memoryWait.waiting > 0 ? info.memoryWait : null
+  const remote = live && server.config ? remoteUrls(server.config, addresses) : []
 
   return (
     <header className="header">
@@ -47,6 +50,14 @@ export function StatusHeader(): React.JSX.Element {
           {live ? (
             <>
               <Chip k="port" v={String(serving?.port ?? server.config?.endpoint.port ?? 8080)} />
+              {remote.length > 0 && (
+                <Chip
+                  tone="warn"
+                  k="remote"
+                  v={(remote[0] as string).replace(/^http:\/\//, '').replace(/\/v1$/, '')}
+                  title={`Other machines can connect: ${remote.join(', ')}. No password or API key, no encryption.`}
+                />
+              )}
               <Chip k="context" v={serving ? (serving.context === null ? 'unlimited' : int(serving.context)) : int(server.config?.generation.context)} />
               {info.resumable && (
                 <Chip

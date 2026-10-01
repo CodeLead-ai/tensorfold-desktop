@@ -37,12 +37,27 @@ fields.
 
 | View | |
 | --- | --- |
-| **Server** | The `tensorfold serve` flags as a form, grouped as the CLI groups them, with presets ("CodeLead endorsed", "Serial reference"). The fields are validated: a model folder must have a `config.json`, the port must be free (the app names a TensorFold server that already holds it), and the context must be a positive integer. The exact command line is shown and can be copied. Start, Stop (SIGTERM, then SIGKILL after the grace period), Restart. The startup lines stream in as they arrive. "Dump stacks" sends SIGUSR1, and TensorFold prints every thread's Python stack into the Log view (for a server that seems stuck). A memory gauge follows `/health` every 2 s. When the server dies, the view shows the exit code and its last 50 lines. While LM Studio is running, an LM Studio card offers "Unload LM Studio, then serve" and "Stop, then restore". When it isn't running, nothing about it is shown. The serving-snapshot card exports JSON and copies the lines for a runner. |
+| **Server** | The `tensorfold serve` flags as a form, grouped as the CLI groups them, with presets ("CodeLead endorsed", "Serial reference"). A **Remote connections** switch lets other machines use the server: see [Remote connections](#remote-connections). The fields are validated: a model folder must have a `config.json`, the port must be free (the app names a TensorFold server that already holds it), and the context must be a positive integer. The exact command line is shown and can be copied. Start, Stop (SIGTERM, then SIGKILL after the grace period), Restart. The startup lines stream in as they arrive. "Dump stacks" sends SIGUSR1, and TensorFold prints every thread's Python stack into the Log view (for a server that seems stuck). A memory gauge follows `/health` every 2 s. When the server dies, the view shows the exit code and its last 50 lines. While LM Studio is running, an LM Studio card offers "Unload LM Studio, then serve" and "Stop, then restore". When it isn't running, nothing about it is shown. The serving-snapshot card exports JSON and copies the lines for a runner. |
 | **Requests** | Every `done` line as a row: prompt, cached, effort, thinking, reply tokens, finish, tok/s, ttft, prefill, prefill tok/s, accepted drafts, ms/round, prefix-cache hits/misses/evictions, sha. Refusals are highlighted rows, with their message and the reply tokens the client asked for. From TensorFold 0.4.0, a request that memory pressure ended is a row too, and a request too long for its prompt to be kept for the next turn is marked (the header shows the limit, "prompts kept ≤ N", and the streams waiting for memory). A live tok/s sparkline, and the session's totals. |
 | **Checkpoints** | Scans the LM Studio models folder, the Hugging Face cache, and any folder you add. Each servable checkpoint gets a card built from `tensorfold info`: family, whether it is tested, quantization, max context, size on disk, and whether its drafter is pulled. "Serve this" fills the form. It can pull from Hugging Face, and the tested families' drafters are one click away. |
 | **Probe** | Sends one chat completion and measures ttft and tok/s, shown beside the server's own `done` line for the same request. It also runs the saved alternation set: the prompt alone, then after a big generation, then again. |
 | **Log** | The raw stream from stdout and stderr, plus the app's own notes. Follow mode, filter, copy. The app's own `/health` polls are hidden unless you show them. |
 | **Settings** | The binary, its version and the flags its `serve --help` lists, and a check for a newer release (`tensorfold update --check`; the app shows the command that installs it and installs nothing); checkpoint folders; LM Studio's `lms` and the unload and restore commands; the stop grace period; the `/health` interval; the theme; and a network audit of the window. |
+
+### Remote connections
+
+TensorFold listens on `127.0.0.1` by default, so only this Mac can connect. The **Remote connections** switch, at the top
+of the Endpoint section, passes `--host 0.0.0.0` so other machines on the network can connect too. Before it turns on,
+the app asks for confirmation and warns:
+- TensorFold has no password or API key yet, so anyone who can reach the port can use the model.
+- There is no encryption; prompts and replies travel as plain HTTP.
+- The first time, the macOS firewall may ask whether Python can accept incoming connections. Other machines can't
+  connect until it is allowed.
+
+The switch carries across presets, like the environment settings, and a preset still shows as itself with it on.
+While a server accepts remote connections, the header shows a "remote" chip, and the Command card shows the address
+to use, for example `http://Peters-MacBook-Pro.local:8080/v1`, with a Copy button. The change takes effect on the next
+start or restart. An SSH tunnel is the safer alternative when the server should stay on this Mac only.
 
 The app watches the servers it starts. A server started elsewhere, such as by a bench runner script, shows up
 only as the port being in use; the app names the model it serves.
@@ -119,6 +134,7 @@ Environment knobs:
 | `MOCK_TENSORFOLD_VERSION` | 0.5.0 | `0.3.6.2` plays the older version: its help, its lines |
 | `MOCK_TENSORFOLD_LATEST` | this version | What `update --check` finds: a version, or `offline` |
 | `MOCK_TENSORFOLD_MEMORY` | | `pressure`: the replay's streams wait for memory, and one ends (0.4.0+'s lines) |
+| `MOCK_TENSORFOLD_LOOPBACK_ONLY` | | `1`: listen on `127.0.0.1` even when `--host` asks for more (the UI tests of the remote switch) |
 
 The icon joins the two brands. TensorFold's folded sheet, a mesh with lit nodes, twists once, from its coral and
 violet into CodeLead's blue and cyan. It sits on CodeLead's dark navy tile, over the glowing cursor of CodeLead's

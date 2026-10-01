@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased: remote connections (2026-10-01)
+
+- **A Remote connections switch** in the Server view's Endpoint section. On passes `--host 0.0.0.0`; it asks first,
+  in a dialog that warns there is no password or API key, no encryption, and that the macOS firewall may ask the first
+  time. Off drops `--host`, so only this Mac can connect. Presets keep the switch, and the preset still shows as
+  itself.
+- While a server accepts remote connections, a "remote" chip shows in the header, and the Command card shows the
+  address other machines use (the Bonjour name, then the IP addresses) with a Copy button.
+- **The port check also connects to 127.0.0.1.** On macOS a server can bind `0.0.0.0` beside one on `127.0.0.1` with
+  the same port, so a remote start could have run a second 27B server beside a local one.
+- `npm run test:real` has an opt-in remote step (`TFDESK_REAL_REMOTE=1`). It passed against the real server: 200 on
+  the network address with the switch on, refused with it off. The test also logs the app's own errors, and no longer
+  hangs if the app does not quit.
+- Tests: 191 unit tests and 9 UI tests.
+
 ## Unreleased: TensorFold 0.5.0 (2026-09-30)
 
 This Mac's TensorFold moved from 0.3.6.2 to 0.5.0 (see [NOTES.md](NOTES.md#tensorfold-050-installed-2026-09-30)).

@@ -13,6 +13,7 @@ import {
   type GroupId,
   type ServeConfig
 } from '@shared/config'
+import { isRemote, remoteUrls, withRemote } from '@shared/remote'
 import { helpSwitches, unknownFlags, type HelpFlag } from '@shared/serveHelp'
 import type { SessionInfo } from '@shared/session'
 import { drafterName } from '@shared/session'
@@ -134,6 +135,7 @@ function ConfigCard(): React.JSX.Element {
       </div>
       {GROUPS.slice(0, 3).map((group) => (
         <Section key={group} id={group} title={GROUP_TITLES[group]} open={open[group] ?? false} onToggle={() => setOpen({ ...open, [group]: !open[group] })} count={Object.values(form[group]).filter((v) => v !== undefined).length}>
+          {group === 'endpoint' && <RemoteField />}
           {FLAGS.filter((f) => f.group === group).map((spec) => (
             <FlagField
               key={spec.cli}
@@ -201,6 +203,46 @@ function ConfigCard(): React.JSX.Element {
   )
 }
 
+/**
+ * The remote-connections switch: on passes --host 0.0.0.0 once the user has read the confirmation (no password or
+ * API key, no encryption, the firewall), off drops --host so only this Mac can connect.
+ */
+function RemoteField(): React.JSX.Element {
+  const form = useDesk((s) => s.form)
+  const setForm = useDesk((s) => s.setForm)
+  const addresses = useDesk((s) => s.addresses)
+  const on = isRemote(form)
+  const port = form.endpoint.port ?? 8080
+  const url = `http://${addresses?.hostname ?? 'this-mac.local'}:${port}/v1`
+  return (
+    <Field
+      wide
+      label={<span>Remote connections</span>}
+      help={
+        on
+          ? `On: other machines on your network can connect at ${url} (--host 0.0.0.0). No password and no encryption.`
+          : 'Off: only this Mac can connect (127.0.0.1). On lets other machines on your network use the server.'
+      }
+    >
+      <span className="row" style={{ height: 30 }}>
+        <input
+          type="checkbox"
+          className="switch"
+          aria-label="Remote connections"
+          checked={on}
+          onChange={async (e) => {
+            if (!e.target.checked) return setForm(withRemote(useDesk.getState().form, false))
+            if (await window.tfdesk.confirmRemote(port)) setForm(withRemote(useDesk.getState().form, true))
+          }}
+        />
+        <span className={on ? 'warn' : 'muted'} style={{ fontSize: 12 }}>
+          {on ? 'on: other machines can connect' : 'off: this Mac only'}
+        </span>
+      </span>
+    </Field>
+  )
+}
+
 function Section({ id, title, note, open, onToggle, count, children }: { id: string; title: string; note?: string; open: boolean; onToggle: () => void; count: number; children: React.ReactNode }): React.JSX.Element {
   return (
     <div className="form-section" data-section={id}>
@@ -218,7 +260,8 @@ function Section({ id, title, note, open, onToggle, count, children }: { id: str
 }
 
 function Command({ text }: { text: string }): React.JSX.Element {
-  const parts = text.split(/(\s--[a-z][a-z0-9-]*)/g)
+  // Each flag is one unbreakable word; the line breaks at the space before it.
+  const parts = text.split(/(?<=\s)(--[a-z][a-z0-9-]*)/g)
   const first = parts[0] ?? ''
   const serveAt = first.search(/\sserve\s/)
   return (
@@ -243,11 +286,13 @@ function CommandCard(): React.JSX.Element {
   const server = useDesk((s) => s.server)
   const busy = useDesk((s) => s.busy)
   const binary = useDesk((s) => s.binary)
+  const addresses = useDesk((s) => s.addresses)
   const { start, stop, restart, kill, setView, dumpStacks } = useDesk.getState()
   const errors = issues.filter((i) => i.severity === 'error')
   const running = server.status === 'loading' || server.status === 'serving'
   // TensorFold arms its stack dump just before the memory budget line; SIGUSR1 before then would end it.
   const dumpable = server.status === 'serving' || (server.status === 'loading' && server.info.memoryBudget !== null)
+  const remote = running && server.config ? remoteUrls(server.config, addresses) : []
   const differs =
     running && server.config !== null && JSON.stringify([buildServeArgv(form), buildServeEnv(form)]) !== JSON.stringify([server.argv, buildServeEnv(server.config)])
 
@@ -260,6 +305,15 @@ function CommandCard(): React.JSX.Element {
       </div>
       <div className="card-body">
         <Command text={preview || '…'} />
+        {remote.length > 0 && (
+          <div className="remote-line">
+            <span className="tag warn">remote</span>
+            <span>Other machines connect at</span>
+            <code className="selectable">{remote[0]}</code>
+            <CopyButton text={remote[0] as string} />
+            {remote.length > 1 && <span className="faint selectable">or {remote.slice(1).join(', ')}</span>}
+          </div>
+        )}
         {binary && !binary.path && (
           <div className="issue error" style={{ marginTop: 10 }}>
             <Icon name="alert" size={14} />

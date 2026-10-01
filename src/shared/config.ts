@@ -399,16 +399,21 @@ function cloneGroups(flags: FlagGroups): FlagGroups {
   return JSON.parse(JSON.stringify(flags)) as FlagGroups
 }
 
-/** A preset's flags on the given model (and no others); the environment is the machine's, so it is kept. */
+/**
+ * A preset's flags on the given model (and no others). Where the server listens (`--host`, the remote-connections
+ * switch) and the environment are the machine's, not the preset's, so they are kept.
+ */
 export function applyPreset(config: ServeConfig, id: Preset['id']): ServeConfig {
   const preset = PRESETS.find((p) => p.id === id)
   if (!preset) throw new Error(`no preset ${id}`)
-  return { model: config.model, ...cloneGroups(preset.flags), env: { ...config.env } }
+  const flags = cloneGroups(preset.flags)
+  if (config.endpoint.host !== undefined) flags.endpoint.host = config.endpoint.host
+  return { model: config.model, ...flags, env: { ...config.env } }
 }
 
-/** The preset whose flags the configuration has exactly, else 'custom'. */
+/** The preset whose flags the configuration has exactly (where it listens aside), else 'custom'. */
 export function presetOf(config: ServeConfig): PresetId {
-  const argv = buildServeArgv({ ...config, model: '' })
+  const argv = buildServeArgv({ ...config, model: '', endpoint: { ...config.endpoint, host: undefined } })
   for (const preset of PRESETS) {
     const presetArgv = buildServeArgv({ model: '', ...preset.flags, env: {} })
     if (argv.length === presetArgv.length && argv.every((w, i) => w === presetArgv[i])) return preset.id

@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { _electron as electron, type ElectronApplication, type Page } from 'playwright-core'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { localAddresses } from '../../src/main/remote'
 import { ROOT, freePort } from '../helpers'
 
 let app: ElectronApplication
@@ -23,6 +24,8 @@ async function launch(dir: string, mockEnv: Record<string, string> = {}): Promis
       MOCK_TENSORFOLD_TIME_SCALE: '0.003',
       MOCK_TENSORFOLD_INTERVAL_MS: '100',
       FAKE_LMS_STATE: join(dir, 'fake-lms.json'),
+      // the remote switch's test serves --host 0.0.0.0; the mock stays on 127.0.0.1 all the same
+      MOCK_TENSORFOLD_LOOPBACK_ONLY: '1',
       ...mockEnv
     }
   })
@@ -126,6 +129,76 @@ describe('TensorFold releases', () => {
       rmSync(dir, { recursive: true, force: true })
     }
   })
+})
+
+describe('remote connections', () => {
+  type Asked = { message: string; detail: string; buttons: string[] }
+  /** Answers the native confirmation in the main process: each call takes the next answer (0 allows, 1 cancels). */
+  async function answerDialogs(answers: number[]): Promise<void> {
+    await app.evaluate(({ dialog }, list) => {
+      const state = globalThis as unknown as { answers: number[]; asked: unknown[]; original?: typeof dialog.showMessageBox }
+      state.answers = list
+      state.asked = []
+      state.original ??= dialog.showMessageBox
+      dialog.showMessageBox = (async (...args: unknown[]) => {
+        state.asked.push(args[args.length - 1])
+        return { response: state.answers.shift() ?? 1, checkboxChecked: false }
+      }) as typeof dialog.showMessageBox
+    }, answers)
+  }
+  /** The real dialog again (the LM Studio test's confirmation goes through it too). */
+  const realDialogs = (): Promise<void> =>
+    app.evaluate(({ dialog }) => {
+      const state = globalThis as unknown as { original?: typeof dialog.showMessageBox }
+      if (state.original) dialog.showMessageBox = state.original
+    })
+  const asked = (): Promise<Asked[]> => app.evaluate(() => (globalThis as unknown as { asked: Asked[] }).asked)
+  const remoteSwitch = (): ReturnType<Page['getByRole']> => page.getByRole('checkbox', { name: 'Remote connections' })
+  const command = (): Promise<string> => page.locator('pre.command').first().innerText()
+
+  it('asks first, keeps the preset, serves with --host 0.0.0.0 and shows where to connect; off asks nothing', async () => {
+    await page.locator('nav.rail').getByRole('button', { name: /Server/ }).click()
+    await page.locator('.segmented button', { hasText: 'CodeLead endorsed' }).click()
+    await expect.poll(command).toMatch(/--port 8080 --context 89600 --reasoning-effort medium --no-update-check$/)
+    await answerDialogs([1, 0])
+    try {
+      await remoteFlow()
+    } finally {
+      await realDialogs()
+    }
+  })
+
+  async function remoteFlow(): Promise<void> {
+    await remoteSwitch().click()
+    await expect.poll(async () => (await asked()).length).toBe(1)
+    expect(await remoteSwitch().isChecked()).toBe(false)
+    expect(await command()).not.toContain('--host')
+
+    await remoteSwitch().click()
+    await expect.poll(() => remoteSwitch().isChecked()).toBe(true)
+    await expect.poll(command).toContain(' --host 0.0.0.0 ')
+    const [question] = await asked()
+    expect(question?.message).toBe('Allow connections from other machines?')
+    expect(question?.detail).toMatch(/No password or API key[\s\S]*No encryption[\s\S]*Firewall: the first time, macOS may ask/)
+    expect(question?.buttons).toEqual(['Allow remote connections', 'Cancel'])
+    expect(await page.locator('.segmented button.on').first().innerText()).toBe('CodeLead endorsed')
+
+    const port = await freePort()
+    await field('--port').fill(String(port))
+    await expect.poll(command).toContain(`--port ${port}`)
+    await header().getByRole('button', { name: 'Start' }).click()
+    await header().locator('.state.serving').waitFor({ timeout: 30_000 })
+    const { hostname } = localAddresses()
+    expect(await header().locator('.chip.warn', { hasText: 'remote' }).innerText()).toContain(`${hostname}:${port}`)
+    expect(await page.locator('.remote-line code').innerText()).toBe(`http://${hostname}:${port}/v1`)
+    await header().getByRole('button', { name: 'Stop' }).click()
+    await header().locator('text=exit 0').waitFor({ timeout: 30_000 })
+
+    await remoteSwitch().click()
+    await expect.poll(command).not.toContain('--host')
+    expect(await remoteSwitch().isChecked()).toBe(false)
+    expect(await asked()).toHaveLength(2)
+  }
 })
 
 describe('P1 against the mock', () => {

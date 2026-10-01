@@ -199,6 +199,15 @@ describe('presets', () => {
     expect(applied.extra).toBeUndefined()
   })
 
+  it('keeps where the server listens across presets, and a preset stays itself with remote connections on', () => {
+    const remote = applyPreset({ ...emptyConfig(MODEL), endpoint: { host: '0.0.0.0', port: 9000 } }, 'serial')
+    expect(remote.endpoint).toEqual({ port: 8080, host: '0.0.0.0' })
+    expect(presetOf(remote)).toBe('serial')
+    expect(buildServeArgv(remote).join(' ')).toBe(`serve ${MODEL} --host 0.0.0.0 --port 8080 --context 89600 --reasoning-effort medium --no-drafts --no-update-check`)
+    expect(presetOf(applyPreset(remote, 'endorsed'))).toBe('endorsed')
+    expect(applyPreset(emptyConfig(MODEL), 'endorsed').endpoint).toEqual({ port: 8080 })
+  })
+
   it('does not share state between applications of a preset', () => {
     const a = applyPreset(emptyConfig(MODEL), 'endorsed')
     a.endpoint.port = 1

@@ -5,6 +5,7 @@
  * (and a vision config for --vision), and the port is free.
  */
 import { FLAGS, renderFlag, type ServeConfig } from './config'
+import { isRemote, listensBeyond } from './remote'
 
 /** The installed binary, for the flags its version has. */
 export interface BinaryFlags {
@@ -114,10 +115,8 @@ export function validateConfig(config: ServeConfig, platform: string = 'darwin',
     warning('generation.maxTokens', 'the default reply is as long as the whole context window')
   }
   if (config.endpoint.visionUrls === true && config.endpoint.vision !== true) error('endpoint.visionUrls', 'needs --vision')
-  const host = config.endpoint.host
-  if (host !== undefined && host !== '' && host !== '127.0.0.1' && host !== 'localhost' && host !== '::1') {
-    warning('endpoint.host', 'listening beyond this Mac makes the server reachable from the network')
-  }
+  // The remote-connections switch asks first; a network address typed in the field gets this reminder instead.
+  if (listensBeyond(config) && !isRemote(config)) warning('endpoint.host', 'listening beyond this Mac makes the server reachable from the network')
   const limit = config.env.memoryLimitGb
   if (limit !== undefined && (!Number.isFinite(limit) || limit <= 0)) error('env.memoryLimitGb', 'must be more than 0')
 

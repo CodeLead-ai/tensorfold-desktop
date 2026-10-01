@@ -5,6 +5,7 @@ import type { Settings } from '@shared/settings'
 import type { ProbeRequest } from '@shared/probe'
 import type { Desk } from './Desk'
 import type { NetworkAudit } from './netGuard'
+import { localAddresses, remoteWarning } from './remote'
 
 /** The renderer's API (src/preload) routed to the Desk service; events go to every window. */
 export function registerIpc(desk: Desk, audit: NetworkAudit): void {
@@ -31,6 +32,15 @@ export function registerIpc(desk: Desk, audit: NetworkAudit): void {
   ipcMain.handle(CHANNELS.logsInfo, () => desk.logsInfo())
   ipcMain.handle(CHANNELS.checkUpdate, () => desk.checkUpdate())
   ipcMain.handle(CHANNELS.dumpStacks, () => desk.dumpStacks())
+  ipcMain.handle(CHANNELS.networkAddresses, () => localAddresses())
+  // Before the form lets other machines connect. Cancel is the default: Return does not open the server.
+  ipcMain.handle(CHANNELS.confirmRemote, async (e, port: number) => {
+    const win = BrowserWindow.fromWebContents(e.sender)
+    const words = remoteWarning(Number.isInteger(port) && port > 0 ? port : 8080, localAddresses())
+    const options = { type: 'warning' as const, buttons: ['Allow remote connections', 'Cancel'], defaultId: 1, cancelId: 1, ...words }
+    const choice = win ? await dialog.showMessageBox(win, options) : await dialog.showMessageBox(options)
+    return choice.response === 0
+  })
 
   ipcMain.handle(CHANNELS.getSession, () => desk.session())
   ipcMain.handle(CHANNELS.start, (_e, config: ServeConfig) => desk.start(config))

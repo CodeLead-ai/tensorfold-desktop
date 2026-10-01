@@ -335,6 +335,25 @@ textarea {
   font-family: var(--mono);
 }
 
+.tag.warn {
+  border-color: var(--warn);
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.remote-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 12.5px;
+}
+
+.remote-line code {
+  font-size: 12px;
+}
+
 .chip.warn {
   border-color: var(--warn);
   background: var(--warn-soft);
@@ -777,11 +796,12 @@ textarea.input {
   font-size: 12px;
   line-height: 1.55;
   white-space: pre-wrap;
-  word-break: break-all;
+  overflow-wrap: anywhere;
   color: var(--text);
 }
 
 .command .flag {
+  white-space: nowrap;
   color: var(--accent-text);
 }
 

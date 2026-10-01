@@ -11,6 +11,7 @@ import type { HealthSample } from '@shared/health'
 import type { LmStudioStatus } from '@shared/lmstudio'
 import type { ProbeRequest, ProbeResult } from '@shared/probe'
 import type { PullState } from '@shared/pull'
+import type { NetworkAddresses } from '@shared/remote'
 import { rowFromLine, type RequestRow } from '@shared/requests'
 import { emptySessionInfo } from '@shared/session'
 import type { Settings } from '@shared/settings'
@@ -74,6 +75,8 @@ interface DeskStore {
   probing: string | null
   updateCheck: UpdateCheck | null
   checkingUpdate: boolean
+  /** This Mac's names on the network, for the remote-connections switch. */
+  addresses: NetworkAddresses | null
 
   init(): Promise<void>
   setView(view: ViewId): void
@@ -140,6 +143,7 @@ export const useDesk = create<DeskStore>((set, get) => ({
   probing: null,
   updateCheck: null,
   checkingUpdate: false,
+  addresses: null,
 
   async init() {
     if (get().ready) return
@@ -175,6 +179,9 @@ export const useDesk = create<DeskStore>((set, get) => ({
     })
     get().setForm(get().form)
     void get().detectBinary()
+    void api()
+      .networkAddresses()
+      .then((addresses) => set({ addresses }))
   },
 
   setView(view) {

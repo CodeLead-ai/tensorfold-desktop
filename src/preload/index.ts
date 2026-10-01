@@ -39,7 +39,9 @@ const api: DeskApi = {
   networkAudit: () => ipcRenderer.invoke(CHANNELS.networkAudit),
   logsInfo: () => ipcRenderer.invoke(CHANNELS.logsInfo),
   checkUpdate: () => ipcRenderer.invoke(CHANNELS.checkUpdate),
-  dumpStacks: () => ipcRenderer.invoke(CHANNELS.dumpStacks)
+  dumpStacks: () => ipcRenderer.invoke(CHANNELS.dumpStacks),
+  confirmRemote: (port) => ipcRenderer.invoke(CHANNELS.confirmRemote, port),
+  networkAddresses: () => ipcRenderer.invoke(CHANNELS.networkAddresses)
 }
 
 contextBridge.exposeInMainWorld('tfdesk', api)

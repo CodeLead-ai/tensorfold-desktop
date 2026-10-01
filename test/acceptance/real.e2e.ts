@@ -18,6 +18,9 @@
  * §6.5 runs only when asked, since it unloads LM Studio's model and reloads it:
  *   TFDESK_REAL_LMS=1 TFDESK_RESTORE_COMMAND='<your reload command>' npx vitest run -c vitest.real.config.ts -t 6.5
  * It needs LM Studio running with a model loaded and idle, and port 8080 free.
+ *
+ * The remote-connections switch runs only when asked too, since it opens the server to the network for a moment:
+ *   TFDESK_REAL_REMOTE=1 npm run test:real
  */
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
@@ -28,6 +31,7 @@ import type { DeskApi, ServerState } from '@shared/api'
 import { FLAGS } from '@shared/config'
 import type { LogLine } from '@shared/events'
 import { reproduceCommandLine, type ServingSnapshot } from '@shared/snapshot'
+import { localAddresses } from '../../src/main/remote'
 import { ROOT } from '../helpers'
 
 /** The page's API, inside page.evaluate callbacks (this file is checked without the DOM library). */
@@ -36,6 +40,7 @@ declare const window: { tfdesk: DeskApi }
 const MODEL = join(homedir(), '.lmstudio/models/lmstudio-community/Qwen3.8-27B-MLX-8bit')
 const available = existsSync(join(MODEL, 'config.json'))
 const lmsRun = process.env['TFDESK_REAL_LMS'] === '1'
+const remoteRun = process.env['TFDESK_REAL_REMOTE'] === '1'
 const restoreCommand = process.env['TFDESK_RESTORE_COMMAND'] ?? ''
 
 let app: ElectronApplication
@@ -57,6 +62,14 @@ beforeAll(async () => {
   delete env['ELECTRON_RUN_AS_NODE']
   delete env['TENSORFOLD_DESK_MOCK']
   app = await electron.launch({ args: [ROOT], env: { ...env, TENSORFOLD_DESK_USER_DATA: join(work, 'profile') } })
+  // The main process's own output, and any uncaught exception in it, go to the log. Electron's default would be a
+  // blocking alert with nothing written anywhere.
+  app.process().stderr?.on('data', (data: Buffer) => {
+    for (const line of String(data).split('\n')) if (line.trim() && !/^(Debugger (listening|ending)|For help, see)/.test(line)) log('[main]', line)
+  })
+  await app.evaluate(() => {
+    process.on('uncaughtException', (e) => console.error(`uncaught exception: ${e instanceof Error ? e.stack : String(e)}`))
+  })
   page = await app.firstWindow()
   await page.locator('text=Configuration').waitFor()
 })
@@ -69,7 +82,14 @@ afterAll(async () => {
   if (!available) return
   const state = await page?.evaluate(() => window.tfdesk.getSession().then((s) => s.state.status)).catch(() => 'unknown')
   if (state !== 'stopped') await page?.evaluate(() => window.tfdesk.stopServer()).catch(() => undefined)
-  await app?.close()
+  if (app) {
+    const closed = await Promise.race([app.close().then(() => true), new Promise<boolean>((r) => setTimeout(() => r(false), 20_000))])
+    if (!closed) {
+      failed = true
+      log('the app did not quit in 20 s; killed it')
+      app.process().kill('SIGKILL')
+    }
+  }
   if (failed) {
     // The logs stay for a look; the snapshots TensorFold saved there (a 36k-token conversation is 2.5 GiB) do not.
     for (const big of ['session-snapshots', 'prefix-snapshots']) rmSync(join(work, big), { recursive: true, force: true })
@@ -325,5 +345,50 @@ describe.skipIf(!available)('SPEC §6 against the real server', () => {
     log(`restore command output (last lines):\n${output}`)
     expect(await card.locator('.tag.ok').count()).toBeGreaterThan(0)
     expect(restored.models.map((m) => m.identifier)).toEqual(before.models.map((m) => m.identifier))
+  })
+
+  it.skipIf(!remoteRun)('remote connections: the switch has the server answer on this Mac\'s network address, and off takes it back', async () => {
+    await lmStudioIsEmpty()
+    const lan = localAddresses().ipv4[0]
+    if (!lan) throw new Error('this Mac has no network address to test from')
+    /** GET /v1/models: the status, or why it failed (ECONNREFUSED when nothing listens there). */
+    const models = async (host: string): Promise<number | string> => {
+      try {
+        return (await fetch(`http://${host}:8080/v1/models`, { signal: AbortSignal.timeout(5000) })).status
+      } catch (e) {
+        return (e as { cause?: { code?: string } }).cause?.code ?? String(e)
+      }
+    }
+    // The confirmation is native; answer "Allow remote connections" in the main process.
+    await app.evaluate(({ dialog }) => {
+      dialog.showMessageBox = (async () => ({ response: 0, checkboxChecked: false })) as typeof dialog.showMessageBox
+    })
+    const remoteSwitch = page.getByRole('checkbox', { name: 'Remote connections' })
+    await rail(/Server/).click()
+    await remoteSwitch.click()
+    await expect.poll(() => page.locator('pre.command').innerText()).toContain(' --host 0.0.0.0 ')
+
+    const remote = await startAndServe()
+    expect(remote.commandLine).toContain(' --host 0.0.0.0 ')
+    const onLan = await models(lan.address)
+    const chip = (await header().locator('.chip.warn', { hasText: 'remote' }).innerText()).replace(/\s+/g, ' ')
+    log(`remote on: GET http://${lan.address}:8080/v1/models (${lan.name}) → ${onLan}; header: ${chip}; command card: ${await page.locator('.remote-line code').innerText()}`)
+    expect(onLan).toBe(200)
+    expect(chip).toContain(':8080')
+
+    await remoteSwitch.click()
+    await expect.poll(() => page.locator('pre.command').innerText()).not.toContain('--host')
+    const local = await serveAfter(() => button(header(), 'Restart').click())
+    expect(local.commandLine).not.toContain('--host')
+    const offLan = await models(lan.address)
+    const offLocal = await models('127.0.0.1')
+    log(`remote off: on ${lan.address} → ${offLan}; on 127.0.0.1 → ${offLocal}`)
+    expect(offLan).toBe('ECONNREFUSED')
+    expect(offLocal).toBe(200)
+    expect(await header().locator('.chip.warn', { hasText: 'remote' }).count()).toBe(0)
+
+    await button(header(), 'Stop').click()
+    await header().locator('text=exit 0').waitFor({ timeout: 120_000 })
+    await everyLineKnown('remote')
   })
 })

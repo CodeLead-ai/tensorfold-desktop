@@ -10,6 +10,7 @@ import type { HealthSample } from './health'
 import type { CommandResult, LmStudioStatus } from './lmstudio'
 import type { ProbeRequest, ProbeResult } from './probe'
 import type { PullState } from './pull'
+import type { NetworkAddresses } from './remote'
 import type { HelpFlag } from './serveHelp'
 import type { SessionInfo } from './session'
 import type { Settings } from './settings'
@@ -149,6 +150,13 @@ export interface DeskApi {
   checkUpdate(): Promise<UpdateCheck>
   /** SIGUSR1: TensorFold prints every thread's Python stack on stderr (the Log view shows it). */
   dumpStacks(): Promise<ActionResult>
+  /**
+   * Asks, in a dialog, before the form lets other machines connect: no password or API key, no encryption, and the
+   * macOS firewall may ask. True when the user allows it.
+   */
+  confirmRemote(port: number): Promise<boolean>
+  /** This Mac's Bonjour name and IPv4 addresses, for the URL other machines use. */
+  networkAddresses(): Promise<NetworkAddresses>
 }
 
 export const CHANNELS = {
@@ -183,5 +191,7 @@ export const CHANNELS = {
   networkAudit: 'audit:list',
   logsInfo: 'logs:info',
   checkUpdate: 'binary:update-check',
-  dumpStacks: 'server:dump-stacks'
+  dumpStacks: 'server:dump-stacks',
+  confirmRemote: 'server:confirm-remote',
+  networkAddresses: 'net:addresses'
 } as const
