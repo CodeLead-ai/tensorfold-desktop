@@ -1,6 +1,7 @@
 import { app, BrowserWindow, dialog, nativeTheme, session } from 'electron'
 import { join } from 'node:path'
 import { CHANNELS } from '@shared/api'
+import { confirmStopExternal } from './confirm'
 import { Desk } from './Desk'
 import { registerIpc } from './ipc'
 import { MenuBar } from './MenuBar'
@@ -43,6 +44,10 @@ function createWindow(): BrowserWindow {
     }
   })
   win.once('ready-to-show', () => win.show())
+  // An outside server's /health is read only while the window is on screen; coming back looks for one at once.
+  const visibility = (): void => desk?.setWindowVisible(!win.isDestroyed() && win.isVisible() && !win.isMinimized())
+  for (const event of ['show', 'hide', 'minimize', 'restore'] as const) win.on(event as 'show', visibility)
+  win.on('focus', () => desk?.external.refresh())
   win.on('close', (event) => {
     // With the menu-bar item, closing the window keeps the app (and its server) running.
     if (!quitting && menuBar && process.platform === 'darwin') {
@@ -52,6 +57,7 @@ function createWindow(): BrowserWindow {
   })
   win.on('closed', () => {
     if (mainWindow === win) mainWindow = null
+    desk?.setWindowVisible(false)
   })
   if (devServer) void win.loadURL(devServer)
   else void win.loadFile(join(__dirname, '../renderer/index.html'))
@@ -103,10 +109,14 @@ void app.whenReady().then(async () => {
   })
   desk.on('settings', (next) => (nativeTheme.themeSource = next.theme))
   registerIpc(desk, audit)
-  menuBar = new MenuBar(desk, (view) => {
-    showWindow()
-    if (view) mainWindow?.webContents.send(CHANNELS.navigate, view)
-  })
+  menuBar = new MenuBar(
+    desk,
+    (view) => {
+      showWindow()
+      if (view) mainWindow?.webContents.send(CHANNELS.navigate, view)
+    },
+    (state) => confirmStopExternal(mainWindow && !mainWindow.isDestroyed() ? mainWindow : null, state)
+  )
   showWindow()
   const screens = process.env['TENSORFOLD_DESK_SCREENS']
   if (screens && mainWindow) {

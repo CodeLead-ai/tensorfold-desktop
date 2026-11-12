@@ -1,10 +1,11 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { spawn } from 'node:child_process'
+import { closeSync, mkdtempSync, openSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { _electron as electron, type ElectronApplication, type Page } from 'playwright-core'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { localAddresses } from '../../src/main/remote'
-import { ROOT, freePort } from '../helpers'
+import { MOCK, MOCK_MODEL, ROOT, freePort } from '../helpers'
 
 let app: ElectronApplication
 let page: Page
@@ -131,28 +132,28 @@ describe('TensorFold releases', () => {
   })
 })
 
+type Asked = { message: string; detail: string; buttons: string[] }
+/** Answers the native confirmation in the main process: each call takes the next answer (0 allows, 1 cancels). */
+async function answerDialogs(answers: number[]): Promise<void> {
+  await app.evaluate(({ dialog }, list) => {
+    const state = globalThis as unknown as { answers: number[]; asked: unknown[]; original?: typeof dialog.showMessageBox }
+    state.answers = list
+    state.asked = []
+    state.original ??= dialog.showMessageBox
+    dialog.showMessageBox = (async (...args: unknown[]) => {
+      state.asked.push(args[args.length - 1])
+      return { response: state.answers.shift() ?? 1, checkboxChecked: false }
+    }) as typeof dialog.showMessageBox
+  }, answers)
+}
+/** The real dialog again (the LM Studio test's confirmation goes through it too). */
+const realDialogs = (): Promise<void> =>
+  app.evaluate(({ dialog }) => {
+    const state = globalThis as unknown as { original?: typeof dialog.showMessageBox }
+    if (state.original) dialog.showMessageBox = state.original
+  })
+const asked = (): Promise<Asked[]> => app.evaluate(() => (globalThis as unknown as { asked: Asked[] }).asked)
 describe('remote connections', () => {
-  type Asked = { message: string; detail: string; buttons: string[] }
-  /** Answers the native confirmation in the main process: each call takes the next answer (0 allows, 1 cancels). */
-  async function answerDialogs(answers: number[]): Promise<void> {
-    await app.evaluate(({ dialog }, list) => {
-      const state = globalThis as unknown as { answers: number[]; asked: unknown[]; original?: typeof dialog.showMessageBox }
-      state.answers = list
-      state.asked = []
-      state.original ??= dialog.showMessageBox
-      dialog.showMessageBox = (async (...args: unknown[]) => {
-        state.asked.push(args[args.length - 1])
-        return { response: state.answers.shift() ?? 1, checkboxChecked: false }
-      }) as typeof dialog.showMessageBox
-    }, answers)
-  }
-  /** The real dialog again (the LM Studio test's confirmation goes through it too). */
-  const realDialogs = (): Promise<void> =>
-    app.evaluate(({ dialog }) => {
-      const state = globalThis as unknown as { original?: typeof dialog.showMessageBox }
-      if (state.original) dialog.showMessageBox = state.original
-    })
-  const asked = (): Promise<Asked[]> => app.evaluate(() => (globalThis as unknown as { asked: Asked[] }).asked)
   const remoteSwitch = (): ReturnType<Page['getByRole']> => page.getByRole('checkbox', { name: 'Remote connections' })
   const command = (): Promise<string> => page.locator('pre.command').first().innerText()
 
@@ -234,3 +235,46 @@ describe('P1 against the mock', () => {
     expect(await header().locator('.state').innerText()).toBe('Stopped')
   })
 })
+
+describe('a server the app did not start', () => {
+  it('shows it (its model, command, origin and requests), offers no restart, and stops it only after asking', async () => {
+    const port = await freePort()
+    const dir = mkdtempSync(join(tmpdir(), 'tfdesk-e2e-outside-'))
+    const logFile = join(dir, 'serve.log')
+    const fd = openSync(logFile, 'w')
+    const env: NodeJS.ProcessEnv = { ...process.env, MOCK_TENSORFOLD_LOAD_MS: '300', MOCK_TENSORFOLD_TIME_SCALE: '0.003', MOCK_TENSORFOLD_INTERVAL_MS: '100', MOCK_TENSORFOLD_LOOPBACK_ONLY: '1' }
+    const child = spawn(process.execPath, [MOCK, 'serve', MOCK_MODEL, '--port', String(port), '--context', '89600'], { env, stdio: ['ignore', fd, fd] })
+    closeSync(fd)
+    const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => child.on('exit', (code, signal) => resolve({ code, signal })))
+    try {
+      await page.locator('nav.rail').getByRole('button', { name: /Server/ }).click()
+      await header().locator('.chip.info', { hasText: 'outside the app' }).waitFor({ timeout: 30_000 })
+      await expect.poll(() => header().locator('.state').innerText(), { timeout: 15_000 }).toBe('Serving')
+      expect(await header().locator('.chips').innerText()).toContain(String(port))
+      expect(await page.locator('pre.command').first().innerText()).toContain(`fake-tensorfold.mjs serve ${MOCK_MODEL} --port ${port} --context 89600`)
+      expect(await page.locator('.outside-line').innerText()).toMatch(new RegExp(`Started outside the app \\(pid ${child.pid}`))
+      expect(await header().getByRole('button', { name: 'Restart', exact: true }).count()).toBe(0)
+
+      await page.locator('nav.rail').getByRole('button', { name: /Requests/ }).click()
+      await expect.poll(() => page.locator('table.data tbody tr').count(), { timeout: 30_000 }).toBeGreaterThan(0)
+      await page.locator('nav.rail').getByRole('button', { name: /Server/ }).click()
+
+      await answerDialogs([1, 0])
+      try {
+        await header().getByRole('button', { name: 'Stop', exact: true }).click()
+        await expect.poll(async () => (await asked()).length).toBe(1)
+        expect((await asked())[0]?.message).toBe('Stop a server the app did not start?')
+        expect(await header().locator('.state').innerText()).toBe('Serving')
+        await header().getByRole('button', { name: 'Stop', exact: true }).click()
+        expect(await exited).toEqual({ code: 0, signal: null })
+        await expect.poll(() => header().locator('.state').innerText(), { timeout: 15_000 }).toBe('Stopped')
+      } finally {
+        await realDialogs()
+      }
+    } finally {
+      child.kill('SIGKILL')
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+

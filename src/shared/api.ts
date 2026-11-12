@@ -6,6 +6,7 @@
 import type { CheckpointScan } from './checkpoints'
 import type { ServeConfig } from './config'
 import type { LogLine } from './events'
+import type { ExternalInfo } from './external'
 import type { HealthSample } from './health'
 import type { CommandResult, LmStudioStatus } from './lmstudio'
 import type { ProbeRequest, ProbeResult } from './probe'
@@ -56,6 +57,8 @@ export interface ServerState {
   logFile: string | null
   info: SessionInfo
   lastExit: ExitInfo | null
+  /** A server the app did not start (a bench script's, say), which it shows and can stop; null for its own. */
+  external: ExternalInfo | null
 }
 
 export type ActionResult = { ok: true } | { ok: false; error: string; issues?: ValidationIssue[] }
@@ -157,6 +160,8 @@ export interface DeskApi {
   confirmRemote(port: number): Promise<boolean>
   /** This Mac's Bonjour name and IPv4 addresses, for the URL other machines use. */
   networkAddresses(): Promise<NetworkAddresses>
+  /** Asks, in a dialog, before stopping a server the app did not start. True when the user goes ahead. */
+  confirmStopExternal(): Promise<boolean>
 }
 
 export const CHANNELS = {
@@ -193,5 +198,6 @@ export const CHANNELS = {
   checkUpdate: 'binary:update-check',
   dumpStacks: 'server:dump-stacks',
   confirmRemote: 'server:confirm-remote',
-  networkAddresses: 'net:addresses'
+  networkAddresses: 'net:addresses',
+  confirmStopExternal: 'server:confirm-stop-external'
 } as const

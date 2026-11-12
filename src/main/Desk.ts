@@ -13,12 +13,12 @@ import type { HealthSample } from '@shared/health'
 import type { CommandResult, LmStudioStatus } from '@shared/lmstudio'
 import type { ProbeRequest, ProbeResult } from '@shared/probe'
 import type { PullState } from '@shared/pull'
-import { helpSwitches } from '@shared/serveHelp'
+import { helpSwitches, otherFlags } from '@shared/serveHelp'
 import type { Settings } from '@shared/settings'
 import { runnerLines } from '@shared/snapshot'
 import type { UpdateCheck } from '@shared/update'
 import { hasErrors, looksLikePath, validateConfig, type ValidationIssue } from '@shared/validate'
-import { findBinary, signalsReachPython } from './binary'
+import { findBinary, runVersion, signalsReachPython } from './binary'
 import { Checkpoints } from './Checkpoints'
 import { LmStudio } from './LmStudio'
 import { logStats, pruneLogs } from './logRetention'
@@ -27,6 +27,7 @@ import { Puller } from './Pull'
 import { writeSnapshot } from './SnapshotWriter'
 import { HealthPoller, healthBase } from './HealthPoller'
 import { describePortOwner, isPortAvailable } from './ports'
+import { ExternalServer, type ProcessProbe } from './External'
 import { ProcessManager } from './ProcessManager'
 import type { SettingsStore } from './Settings'
 import { runUpdateCheck } from './UpdateCheck'
@@ -46,6 +47,10 @@ export interface DeskOptions {
   mock: boolean
   appVersion: string
   platform: string
+  /** Show a `tensorfold serve` the app did not start (default on; tests turn it on when they need it). */
+  watchExternal?: boolean
+  /** How the outside-server watcher looks at processes (tests). */
+  processProbe?: ProcessProbe
 }
 
 interface DeskEvents {
@@ -82,19 +87,46 @@ export class Desk extends EventEmitter<DeskEvents> {
   readonly checkpoints: Checkpoints
   readonly puller: Puller
   readonly lm: LmStudio
+  /** A `tensorfold serve` the app did not start. */
+  readonly external: ExternalServer
   private binaryInfo: BinaryInfo | null = null
   private binaryKey = ''
+  /** Which server the window shows: the app's own (or none), or the outside one, the last to appear. */
+  private shown: 'own' | 'external' = 'own'
+  /** The window is on screen: an outside server's /health is read only then (each read is a line in its log). */
+  private visible = true
+  private readonly versions = new Map<string, Promise<string | null>>()
 
   constructor(private readonly opts: DeskOptions) {
     super()
     const settings = opts.settings.get()
     this.manager = new ProcessManager({ logDir: opts.logDir, keepLogs: settings.keepLogs, env: opts.env, stopGraceMs: settings.stopGraceSeconds * 1000 })
     this.health = new HealthPoller({ intervalMs: settings.healthIntervalMs })
-    this.manager.on('state', (state) => {
-      this.followHealth(state)
-      this.emit('state', state)
+    this.external = new ExternalServer({
+      mock: opts.mock,
+      stopGraceMs: settings.stopGraceSeconds * 1000,
+      preferredPort: () => this.settings.lastConfig.endpoint.port ?? 8080,
+      others: () => otherFlags(this.binaryInfo?.serveHelp ?? null),
+      version: (binary) => this.versionOf(binary),
+      own: () => this.manager.state.pid,
+      ...(opts.processProbe ? { probe: opts.processProbe } : {})
     })
-    this.manager.on('lines', (lines) => this.emit('lines', lines))
+    this.manager.on('state', (state) => {
+      if (this.manager.running) this.shown = 'own'
+      this.external.watch(!this.manager.running && opts.watchExternal !== false)
+      if (this.shown === 'own') this.publish(state)
+    })
+    this.manager.on('lines', (lines) => this.shown === 'own' && this.emit('lines', lines))
+    this.external.on('state', (state) => {
+      if (this.manager.running) return
+      const switched = this.shown !== 'external'
+      this.shown = 'external'
+      // The state first: the window clears the previous session's lines when the session changes.
+      this.publish(state)
+      if (switched) this.emit('lines', this.external.lines())
+    })
+    this.external.on('lines', (lines) => this.shown === 'external' && this.emit('lines', lines))
+    this.external.watch(opts.watchExternal !== false)
     this.health.on('sample', (sample) => this.emit('health', sample))
     this.checkpoints = new Checkpoints({ cacheFile: opts.infoCacheFile, env: opts.env, platform: opts.platform, home: opts.home })
     this.puller = new Puller(opts.env)
@@ -109,6 +141,7 @@ export class Desk extends EventEmitter<DeskEvents> {
   setSettings(patch: Partial<Settings>): Settings {
     const next = this.opts.settings.set(patch)
     this.manager.setStopGrace(next.stopGraceSeconds * 1000)
+    this.external.setStopGrace(next.stopGraceSeconds * 1000)
     this.health.setInterval(next.healthIntervalMs)
     this.manager.setKeepLogs(next.keepLogs)
     if (this.opts.logDir) pruneLogs(this.opts.logDir, next.keepLogs, this.manager.state.logFile)
@@ -116,10 +149,29 @@ export class Desk extends EventEmitter<DeskEvents> {
     return next
   }
 
+  /** The server the window shows: the app's own, or one it did not start. */
+  get state(): ServerState {
+    return this.shown === 'external' && this.external.state ? this.external.state : this.manager.state
+  }
+
+  /** Whether the shown server runs (the app's own, or an outside one). */
+  get running(): boolean {
+    return this.manager.running || (this.shown === 'external' && this.external.running)
+  }
+
+  /** The window was shown or hidden: an outside server's /health is read only while it is shown. */
+  setWindowVisible(visible: boolean): void {
+    if (visible === this.visible) return
+    this.visible = visible
+    if (visible) this.external.refresh()
+    this.followHealth(this.state)
+  }
+
   session(): SessionSnapshot {
+    const external = this.shown === 'external' && this.external.state !== null
     return {
-      state: this.manager.state,
-      lines: this.manager.lines(),
+      state: this.state,
+      lines: external ? this.external.lines() : this.manager.lines(),
       health: this.health.latest,
       mock: this.opts.mock,
       appVersion: this.opts.appVersion,
@@ -190,15 +242,23 @@ export class Desk extends EventEmitter<DeskEvents> {
     return { ok: true }
   }
 
+  /** Stops the shown server: the app's own, or, once the user has confirmed it, one it did not start. */
   async stop(): Promise<ActionResult> {
-    if (!this.manager.running) return { ok: false, error: 'the server is not running' }
-    await this.manager.stop()
-    return { ok: true }
+    if (this.manager.running) {
+      await this.manager.stop()
+      return { ok: true }
+    }
+    if (this.shown === 'external' && this.external.running) {
+      this.external.stop()
+      return { ok: true }
+    }
+    return { ok: false, error: 'the server is not running' }
   }
 
   kill(): ActionResult {
-    if (!this.manager.running) return { ok: false, error: 'the server is not running' }
-    this.manager.kill()
+    if (this.manager.running) this.manager.kill()
+    else if (this.shown === 'external' && this.external.running) this.external.kill()
+    else return { ok: false, error: 'the server is not running' }
     return { ok: true }
   }
 
@@ -208,7 +268,7 @@ export class Desk extends EventEmitter<DeskEvents> {
    * action would end the process.
    */
   dumpStacks(): ActionResult {
-    const state = this.manager.state
+    const state = this.state
     if (state.status !== 'serving' && state.status !== 'loading') return { ok: false, error: 'the server is not running' }
     if (state.status === 'loading' && !state.info.memoryBudget) {
       return { ok: false, error: 'not yet: TensorFold arms its stack dump just before its memory budget line, and SIGUSR1 would end it before then' }
@@ -216,9 +276,9 @@ export class Desk extends EventEmitter<DeskEvents> {
     if (!state.binary || !signalsReachPython(state.binary)) {
       return { ok: false, error: `${state.binary ?? 'the binary'} is not a Python entry point, so SIGUSR1 might not reach TensorFold: send it to the Python process yourself (kill -USR1 <pid>)` }
     }
-    return this.manager.signal('SIGUSR1', 'SIGUSR1 sent: TensorFold prints every thread\'s stack on stderr')
-      ? { ok: true }
-      : { ok: false, error: 'the server is not running' }
+    const note = `SIGUSR1 sent: TensorFold prints every thread's stack on stderr${state.external ? (state.external.logFile ? ', into its log' : ', where its output goes') : ''}`
+    const sent = state.external ? this.external.signal('SIGUSR1', note) : this.manager.signal('SIGUSR1', note)
+    return sent ? { ok: true } : { ok: false, error: 'the server is not running' }
   }
 
   /** `tensorfold update --check` with the binary in use. The CLI asks GitHub; nothing is installed. */
@@ -232,6 +292,11 @@ export class Desk extends EventEmitter<DeskEvents> {
 
   async restart(config: ServeConfig): Promise<ActionResult> {
     if (this.manager.running) await this.manager.stop()
+    else if (this.shown === 'external' && this.external.running) {
+      this.external.stop()
+      const deadline = Date.now() + this.settings.stopGraceSeconds * 1000 + 5000
+      while (this.external.running && Date.now() < deadline) await new Promise((r) => setTimeout(r, 250))
+    }
     return this.start(config)
   }
 
@@ -252,7 +317,7 @@ export class Desk extends EventEmitter<DeskEvents> {
   /** SPEC §2.5: unload what LM Studio has loaded (its memory counts against the budget), then serve. */
   async unloadAndServe(config: ServeConfig): Promise<StepsResult> {
     const steps: CommandResult[] = []
-    if (this.manager.running) return { ok: false, error: `the server is ${this.manager.state.status}`, steps }
+    if (this.running) return { ok: false, error: `the server is ${this.state.status}`, steps }
     const issues = await this.validate(config)
     if (hasErrors(issues)) return { ok: false, error: 'the configuration has errors; LM Studio was left as it is', steps, issues }
     const settings = this.settings
@@ -283,7 +348,7 @@ export class Desk extends EventEmitter<DeskEvents> {
   }
 
   async probe(request: ProbeRequest): Promise<ProbeResult> {
-    const state = this.manager.state
+    const state = this.state
     const serving = state.info.serving
     if (state.status !== 'serving' || !serving) {
       return {
@@ -291,12 +356,12 @@ export class Desk extends EventEmitter<DeskEvents> {
         ttftS: null, promptTokens: null, completionTokens: null, tokPerS: null, finish: null, server: null, replyPreview: ''
       }
     }
-    return runProbe({ base: healthBase(serving.host, serving.port), model: serving.model, manager: this.manager }, request)
+    return runProbe({ base: healthBase(serving.host, serving.port), model: serving.model, lines: this }, request)
   }
 
   /** SPEC §3.10: the running (or last) configuration as JSON. */
   exportSnapshot(): SnapshotResult {
-    const state = this.manager.state
+    const state = this.state
     if (!state.config || !state.info.serving) return { ok: false, error: 'nothing to export yet: start the server first' }
     if (!this.opts.snapshotDir) return { ok: false, error: 'no folder for snapshots' }
     const latest = this.health.latest
@@ -304,7 +369,7 @@ export class Desk extends EventEmitter<DeskEvents> {
   }
 
   runnerLines(): string | null {
-    return runnerLines(this.manager.state)
+    return runnerLines(this.state)
   }
 
   logsInfo(): LogsInfo {
@@ -315,12 +380,30 @@ export class Desk extends EventEmitter<DeskEvents> {
   dispose(): void {
     this.health.stop()
     this.puller.cancel()
+    this.external.dispose()
     this.manager.dispose()
+  }
+
+  /** The shown server's state, and /health followed for it (an outside server's only while the window is shown). */
+  private publish(state: ServerState): void {
+    this.followHealth(state)
+    this.emit('state', state)
   }
 
   private followHealth(state: ServerState): void {
     const serving = state.info.serving
-    if (state.status === 'serving' && serving) this.health.start(healthBase(serving.host, serving.port))
-    else if (state.status !== 'serving') this.health.stop()
+    const read = state.status === 'serving' && serving !== null && (state.external === null || this.visible)
+    if (read && serving) this.health.start(healthBase(serving.host, serving.port))
+    else this.health.stop()
+  }
+
+  /** `--version` of an outside server's binary, asked once per binary. */
+  private versionOf(binary: string): Promise<string | null> {
+    let version = this.versions.get(binary)
+    if (!version) {
+      version = runVersion(binary, this.opts.env)
+      this.versions.set(binary, version)
+    }
+    return version
   }
 }

@@ -294,8 +294,22 @@ know (fixed above).
   before it and the signal would end the process earlier. It is sent only when the binary is a Python entry point,
   which the venv's is. A shell wrapper that does not exec Python would take the signal itself.
 
-- **Servers the app did not start are out of scope.** A server started by a bench runner, for example, shows up
-  only as the port being in use. The port check names the model it serves.
+- **A server the app did not start is shown (2026-11-12; until then it was out of scope).**
+  - **Finding it:** while the app runs no server of its own, it looks every 3 s with `ps` for a `tensorfold serve`
+    and `lsof` for its port and output. The mock profile looks for the mock CLI only, and the real app for the real
+    one only, so a test run can never pick up a bench's server.
+  - **caffeinate:** with `caffeinate -i -s tensorfold serve …`, the server runs as caffeinate's own process, and a
+    child keeps the caffeinate name and the same command line. That child is skipped.
+  - **Which one:** with several servers, the one on the form's port wins, then any that listens.
+  - **What it shows:** the configuration comes from the command line. `ps` joins arguments with spaces, so the words
+    of a path are joined back up to the next flag. Serving means its port is open. The start time is `ps`'s, and
+    the time it began serving is that plus the log's "loaded in".
+  - **Its log:** when its stdout is a regular file, the app reads it from the last `memory budget` line, which is
+    where the current session starts in a file that `>>` appends to. It then follows the file every second.
+  - **No requests from the app,** except `/health` while the window is shown (each read is an access line in its
+    log), and the port check's `/v1/models` while the form is edited.
+  - **Stop:** a confirmation first; SIGTERM, then SIGKILL after the grace period. The exit code of a process that is
+    not the app's child is unknown. No Restart: it would hand the server over to the app.
 - **The LM Studio card shows only while LM Studio is running.** The app finds LM Studio in the process list
   (the app, or its headless `llmster`) and does not ask `lms`, which could start LM Studio's daemon. When LM Studio
   is not running, nothing is shown, and "Unload LM Studio, then serve" simply serves. When it runs and `lms` is

@@ -5,6 +5,7 @@ import type { Settings } from '@shared/settings'
 import type { ProbeRequest } from '@shared/probe'
 import type { Desk } from './Desk'
 import type { NetworkAudit } from './netGuard'
+import { confirmStopExternal } from './confirm'
 import { localAddresses, remoteWarning } from './remote'
 
 /** The renderer's API (src/preload) routed to the Desk service; events go to every window. */
@@ -41,6 +42,8 @@ export function registerIpc(desk: Desk, audit: NetworkAudit): void {
     const choice = win ? await dialog.showMessageBox(win, options) : await dialog.showMessageBox(options)
     return choice.response === 0
   })
+
+  ipcMain.handle(CHANNELS.confirmStopExternal, (e) => confirmStopExternal(BrowserWindow.fromWebContents(e.sender), desk.state))
 
   ipcMain.handle(CHANNELS.getSession, () => desk.session())
   ipcMain.handle(CHANNELS.start, (_e, config: ServeConfig) => desk.start(config))

@@ -287,24 +287,43 @@ function CommandCard(): React.JSX.Element {
   const busy = useDesk((s) => s.busy)
   const binary = useDesk((s) => s.binary)
   const addresses = useDesk((s) => s.addresses)
-  const { start, stop, restart, kill, setView, dumpStacks } = useDesk.getState()
+  const { start, stop, restart, kill, setView, dumpStacks, setForm } = useDesk.getState()
   const errors = issues.filter((i) => i.severity === 'error')
   const running = server.status === 'loading' || server.status === 'serving'
+  // A server the app did not start: its own command shows here, and the form stays the app's.
+  const outside = server.status !== 'stopped' ? server.external : null
+  const shown = outside ? server.commandLine : preview
   // TensorFold arms its stack dump just before the memory budget line; SIGUSR1 before then would end it.
   const dumpable = server.status === 'serving' || (server.status === 'loading' && server.info.memoryBudget !== null)
   const remote = running && server.config ? remoteUrls(server.config, addresses) : []
   const differs =
-    running && server.config !== null && JSON.stringify([buildServeArgv(form), buildServeEnv(form)]) !== JSON.stringify([server.argv, buildServeEnv(server.config)])
+    !outside && running && server.config !== null && JSON.stringify([buildServeArgv(form), buildServeEnv(form)]) !== JSON.stringify([server.argv, buildServeEnv(server.config)])
 
   return (
     <section className="card">
       <div className="card-head">
         <h2>Command</h2>
         <span className="spacer" />
-        <CopyButton text={preview} />
+        <CopyButton text={shown} />
       </div>
       <div className="card-body">
-        <Command text={preview || '…'} />
+        <Command text={shown || '…'} />
+        {outside && (
+          <div className="outside-line">
+            <span className="tag info">outside the app</span>
+            <span>
+              Started outside the app (pid {server.pid ?? '?'}
+              {outside.cwd ? `, in ${outside.cwd}` : ''}), by a script or a terminal.{' '}
+              {outside.logFile ? 'The app follows its output in the log file.' : 'Its output goes to a terminal or another program, so the app sees no log lines from it.'} The
+              form below is the app's own: Start uses it once this server stops.
+            </span>
+            {server.config && (
+              <button className="btn small" onClick={() => setForm({ ...(server.config as ServeConfig), env: form.env })} title="Put this server's model and flags in the form">
+                Use its flags in the form
+              </button>
+            )}
+          </div>
+        )}
         {remote.length > 0 && (
           <div className="remote-line">
             <span className="tag warn">remote</span>
@@ -325,7 +344,7 @@ function CommandCard(): React.JSX.Element {
             </span>
           </div>
         )}
-        {issues.length > 0 && (
+        {!outside && issues.length > 0 && (
           <div className="issues">
             {issues.map((issue, i) => (
               <div key={i} className={`issue ${issue.severity}`}>
@@ -347,9 +366,11 @@ function CommandCard(): React.JSX.Element {
               <button className="btn danger" onClick={() => void stop()}>
                 <Icon name="stop" size={13} filled /> Stop
               </button>
-              <button className="btn" disabled={busy || errors.length > 0} onClick={() => void restart()}>
-                <Icon name="restart" size={14} /> Restart{differs ? ' with changes' : ''}
-              </button>
+              {!outside && (
+                <button className="btn" disabled={busy || errors.length > 0} onClick={() => void restart()}>
+                  <Icon name="restart" size={14} /> Restart{differs ? ' with changes' : ''}
+                </button>
+              )}
             </>
           )}
           {server.status === 'stopping' && (
@@ -440,7 +461,7 @@ function StartupCard(): React.JSX.Element | null {
       </div>
       <div className="card-body">
         {list.length === 0 ? (
-          <div className="muted">Waiting for the first line…</div>
+          <div className="muted">{server.external && !server.external.logFile ? 'Started outside the app, with its output elsewhere: no startup lines to show.' : 'Waiting for the first line…'}</div>
         ) : (
           <ul className="steps">
             {list.map((s, i) => (

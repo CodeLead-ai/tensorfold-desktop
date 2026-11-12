@@ -122,7 +122,8 @@ function servingState(config: ServeConfig): ServerState {
     killAt: null,
     logFile: null,
     info: lines.map(parseLine).reduce(applyEvent, emptySessionInfo()),
-    lastExit: null
+    lastExit: null,
+    external: null
   }
 }
 

@@ -1,4 +1,5 @@
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { spawn } from 'node:child_process'
+import { chmodSync, closeSync, existsSync, mkdtempSync, openSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
@@ -6,7 +7,7 @@ import { FLAGS, applyPreset, emptyConfig } from '@shared/config'
 import type { HealthSample } from '@shared/health'
 import { defaultSettings } from '@shared/settings'
 import { reproduceCommandLine } from '@shared/snapshot'
-import { Desk, normalizeConfig } from '../../src/main/Desk'
+import { Desk, normalizeConfig, type DeskOptions } from '../../src/main/Desk'
 import { LMSTUDIO_PROCESS } from '../../src/main/LmStudio'
 import { MemorySettings } from '../../src/main/Settings'
 import { FAST_MOCK_ENV, MOCK, MOCK_MODEL, ROOT, freePort, runMock, type Run } from '../helpers'
@@ -23,7 +24,7 @@ afterEach(async () => {
   }
 })
 
-function desk(settingsPatch: Partial<ReturnType<typeof defaultSettings>> = {}, env: Record<string, string> = {}, lmStudioRunning = true): Desk {
+function desk(settingsPatch: Partial<ReturnType<typeof defaultSettings>> = {}, env: Record<string, string> = {}, lmStudioRunning = true, more: Partial<DeskOptions> = {}): Desk {
   const settings = new MemorySettings({ ...defaultSettings('/Users/test'), healthIntervalMs: 500, ...settingsPatch })
   const d = new Desk({
     settings,
@@ -36,7 +37,10 @@ function desk(settingsPatch: Partial<ReturnType<typeof defaultSettings>> = {}, e
     mockBinary: MOCK,
     mock: true,
     appVersion: '0.0.0-test',
-    platform: 'darwin'
+    platform: 'darwin',
+    // Other test files run mock servers at the same time: no Desk here looks for outside servers unless asked.
+    watchExternal: false,
+    ...more
   })
   desks.push(d)
   return d
@@ -276,3 +280,48 @@ describe('LM Studio not running', () => {
     expect(LMSTUDIO_PROCESS.test('/usr/bin/vim notes-about-LM-Studio.txt')).toBe(false)
   })
 })
+
+describe('a server the app did not start', () => {
+  async function until(check: () => boolean, ms = 20_000): Promise<void> {
+    const end = Date.now() + ms
+    while (!check()) {
+      if (Date.now() > end) throw new Error('timed out')
+      await new Promise((r) => setTimeout(r, 50))
+    }
+  }
+
+  it('finds one started outside it (ps, lsof), follows its log, will not start beside it, and stops it when asked', async () => {
+    const port = await freePort()
+    const logFile = join(logDir, `outside-${port}.log`)
+    const fd = openSync(logFile, 'w')
+    const child = spawn(process.execPath, [MOCK, 'serve', MOCK_MODEL, '--port', String(port), '--context', '89600'], {
+      env: { ...process.env, ...FAST_MOCK_ENV, MOCK_TENSORFOLD_INTERVAL_MS: '50' },
+      stdio: ['ignore', fd, fd]
+    })
+    closeSync(fd)
+    const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => child.on('exit', (code, signal) => resolve({ code, signal })))
+    try {
+      await until(() => readFileSync(logFile, 'utf8').includes('] serving '))
+      const config = applyPreset(emptyConfig(MOCK_MODEL), 'endorsed')
+      config.endpoint.port = port
+      const d = desk({ lastConfig: config }, {}, true, { watchExternal: true })
+      await until(() => d.state.external !== null && d.state.status === 'serving')
+      // lsof names the file by its real path (/private/var for /var).
+      expect(d.state).toMatchObject({ pid: child.pid, version: '0.5.0', config: { endpoint: { port } }, external: { logFile: realpathSync(logFile) } })
+      expect(d.state.info.serving).toMatchObject({ model: 'Qwen3.8-27B-MLX-8bit', port })
+      await until(() => d.session().lines.some((l) => l.event.kind === 'done'))
+
+      expect(await d.start(config)).toMatchObject({ ok: false, error: 'the configuration has errors' })
+      expect(await d.validate(config)).toContainEqual({ field: 'endpoint.port', message: `a TensorFold server (Qwen3.8-27B-MLX-8bit) is already serving on port ${port}`, severity: 'error' })
+
+      expect(await d.stop()).toEqual({ ok: true })
+      expect(await exited).toEqual({ code: 0, signal: null })
+      await until(() => d.state.status === 'stopped')
+      expect(d.state.external?.logFile).toBe(realpathSync(logFile))
+      expect(d.running).toBe(false)
+    } finally {
+      child.kill('SIGKILL')
+    }
+  })
+})
+

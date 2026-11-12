@@ -30,9 +30,10 @@ export function StatusHeader(): React.JSX.Element {
   const live = status === 'serving' || status === 'loading' || status === 'stopping'
   const maxBatch = health?.ok ? health.health.max_batch_size : undefined
   const lanes = lanesOf(info, maxBatch)
-  const sampling = serving ? (serving.greedy ? 'greedy' : Object.entries(serving.sampling).map(([k, v]) => `${k.replace('temperature', 'T').replace('top_k', 'k').replace('top_p', 'p').replace('min_p', 'min p')} ${v}`).join(' · ')) : null
+  const sampling = serving ? (serving.greedy ? 'greedy' : Object.entries(serving.sampling).map(([k, v]) => `${k.replace('temperature', 'T').replace('top_k', 'k').replace('top_p', 'p').replace('min_p', 'min p')} ${v}`).join(' · ')) || null : null
   const waiting = status === 'serving' && info.memoryWait && info.memoryWait.waiting > 0 ? info.memoryWait : null
   const remote = live && server.config ? remoteUrls(server.config, addresses) : []
+  const outside = live ? server.external : null
 
   return (
     <header className="header">
@@ -49,6 +50,14 @@ export function StatusHeader(): React.JSX.Element {
         <div className="chips">
           {live ? (
             <>
+              {outside && (
+                <Chip
+                  tone="info"
+                  k="started"
+                  v="outside the app"
+                  title={`pid ${server.pid ?? '?'}${outside.cwd ? `, started in ${outside.cwd}` : ''}: ${outside.psCommand}${outside.logFile ? `\nIts output: ${outside.logFile}` : ''}`}
+                />
+              )}
               <Chip k="port" v={String(serving?.port ?? server.config?.endpoint.port ?? 8080)} />
               {remote.length > 0 && (
                 <Chip
@@ -68,7 +77,7 @@ export function StatusHeader(): React.JSX.Element {
               )}
               {serving && <Chip k="drafts" v={serving.drafts ? (drafterName(info) ?? 'on') : 'off'} />}
               {sampling && <Chip k="sampling" v={sampling} />}
-              {serving && <Chip k="loaded in" v={`${serving.loadedInS.toFixed(1)} s`} />}
+              {serving && Number.isFinite(serving.loadedInS) && <Chip k="loaded in" v={`${serving.loadedInS.toFixed(1)} s`} />}
               {server.servingAt && status === 'serving' && <Chip k="up" v={duration(now - server.servingAt)} />}
               {server.version && <Chip k="tensorfold" v={server.version} />}
               <Chip k="backend" v={(serving?.backend ?? info.loading?.backend ?? 'mlx').toUpperCase()} />
@@ -87,7 +96,7 @@ export function StatusHeader(): React.JSX.Element {
               {died
                 ? exit.spawnError ?? `The server died ${exit.during === 'loading' ? 'while loading' : 'while serving'}; the Server view shows its last lines.`
                 : exit
-                  ? `Stopped at ${new Date(exit.at).toLocaleTimeString()} · exit ${exit.signal ?? exit.code}`
+                  ? `Stopped at ${new Date(exit.at).toLocaleTimeString()}${exit.signal ? ` · ${exit.signal}` : exit.code !== null ? ` · exit ${exit.code}` : ''}`
                   : 'Not running. Start it from here or from the Server view.'}
             </span>
           )}
@@ -101,9 +110,11 @@ export function StatusHeader(): React.JSX.Element {
         )}
         {(status === 'loading' || status === 'serving') && (
           <>
-            <button className="btn" disabled={busy} onClick={() => void restart()} title="Stop, then start with the form as it is now">
-              <Icon name="restart" size={14} /> Restart
-            </button>
+            {!outside && (
+              <button className="btn" disabled={busy} onClick={() => void restart()} title="Stop, then start with the form as it is now">
+                <Icon name="restart" size={14} /> Restart
+              </button>
+            )}
             <button className="btn danger" onClick={() => void stop()}>
               <Icon name="stop" size={13} filled /> Stop
             </button>
@@ -119,7 +130,7 @@ export function StatusHeader(): React.JSX.Element {
   )
 }
 
-function Chip({ k, v, title, tone }: { k: string; v: string; title?: string; tone?: 'warn' }): React.JSX.Element {
+function Chip({ k, v, title, tone }: { k: string; v: string; title?: string; tone?: 'warn' | 'info' }): React.JSX.Element {
   return (
     <span className={`chip ${tone ?? ''}`} title={title}>
       {k} <b>{v}</b>

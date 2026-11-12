@@ -39,7 +39,8 @@ function initialServer(): ServerState {
     killAt: null,
     logFile: null,
     info: emptySessionInfo(),
-    lastExit: null
+    lastExit: null,
+    external: null
   }
 }
 
@@ -216,6 +217,8 @@ export const useDesk = create<DeskStore>((set, get) => ({
   },
 
   async stop() {
+    // A server the app did not start is stopped only once the user has said so.
+    if (get().server.external && !(await api().confirmStopExternal())) return
     const result = await api().stopServer()
     if (!result.ok) get().notify({ kind: 'error', text: result.error })
   },
@@ -234,6 +237,7 @@ export const useDesk = create<DeskStore>((set, get) => ({
   },
 
   async kill() {
+    if (get().server.external && get().server.status !== 'stopping' && !(await api().confirmStopExternal())) return
     await api().killServer()
   },
 

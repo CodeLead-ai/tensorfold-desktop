@@ -59,8 +59,19 @@ While a server accepts remote connections, the header shows a "remote" chip, and
 to use, for example `http://Peters-MacBook-Pro.local:8080/v1`, with a Copy button. The change takes effect on the next
 start or restart. An SSH tunnel is the safer alternative when the server should stay on this Mac only.
 
-The app watches the servers it starts. A server started elsewhere, such as by a bench runner script, shows up
-only as the port being in use; the app names the model it serves.
+### A server started outside the app
+
+When a `tensorfold serve` the app did not start is running, from a bench script or a terminal, the app shows it.
+It shows the model, port and flags (read from its command line) and how long it has been up. Its header chip says
+"started outside the app". The Command card shows its exact command and the folder it was started in, with a button
+that copies its flags into the form. When its output goes to a file, as a bench script's `> file.log` does, the app
+follows that file from the current session's start: the startup lines, the request feed and the log work as for
+the app's own server. Its output may instead go to a terminal: the app then shows what the command line says, and
+treats the server as serving once its port is open.
+
+Stop asks first, since something else may be using the server (SIGTERM, then SIGKILL after the grace period).
+Restart is not offered: it would hand the server over to the app. The memory gauge reads its `/health` only while
+the window is on screen, since each read is a line in its log. Quitting the app leaves such a server running.
 
 A menu-bar item shows the state as a dot and the last request's tok/s. Its menu can start and stop the server.
 Closing the window keeps the app, and its server, running. Quitting asks before it stops a running server.

@@ -1,7 +1,12 @@
 /** Runs a probe against the serving server (SPEC §3.9); the renderer has no network, so it runs here. */
 import type { DoneEvent, LogLine } from '@shared/events'
 import { matchDone, takeSseData, type ProbeRequest, type ProbeResult } from '@shared/probe'
-import type { ProcessManager } from './ProcessManager'
+
+/** Where the server's lines arrive (the Desk: its own server's, or an outside one's log). */
+export interface LineSource {
+  on(event: 'lines', listener: (lines: LogLine[]) => void): unknown
+  off(event: 'lines', listener: (lines: LogLine[]) => void): unknown
+}
 
 interface Chunk {
   error?: { message?: string }
@@ -10,7 +15,7 @@ interface Chunk {
 }
 
 export async function runProbe(
-  target: { base: string; model: string; manager: ProcessManager },
+  target: { base: string; model: string; lines: LineSource },
   req: ProbeRequest,
   options: { timeoutMs?: number; matchWaitMs?: number; fetchImpl?: typeof fetch } = {}
 ): Promise<ProbeResult> {
@@ -20,7 +25,7 @@ export async function runProbe(
   const onLines = (lines: LogLine[]): void => {
     for (const l of lines) if (l.event.kind === 'done' && !l.event.background) done.push({ at: l.at, event: l.event })
   }
-  target.manager.on('lines', onLines)
+  target.lines.on('lines', onLines)
   const startedAt = Date.now()
   const t0 = performance.now()
   const result: ProbeResult = {
@@ -128,6 +133,6 @@ export async function runProbe(
     return result
   } finally {
     result.totalS ||= (performance.now() - t0) / 1000
-    target.manager.off('lines', onLines)
+    target.lines.off('lines', onLines)
   }
 }

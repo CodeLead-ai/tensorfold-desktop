@@ -341,6 +341,21 @@ textarea {
   color: var(--warn);
 }
 
+.tag.info {
+  border-color: color-mix(in srgb, var(--accent-text) 45%, var(--line));
+  color: var(--accent-text);
+}
+
+.outside-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
 .remote-line {
   display: flex;
   flex-wrap: wrap;
@@ -352,6 +367,14 @@ textarea {
 
 .remote-line code {
   font-size: 12px;
+}
+
+.chip.info {
+  border-color: color-mix(in srgb, var(--accent-text) 45%, var(--line));
+}
+
+.chip.info b {
+  color: var(--accent-text);
 }
 
 .chip.warn {

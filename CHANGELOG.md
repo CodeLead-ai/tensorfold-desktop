@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased: servers started outside the app (2026-11-12)
+
+- **The app shows a `tensorfold serve` it did not start**, from a bench script or a terminal: its model, port and
+  flags, its uptime, and a "started outside the app" chip. The Command card shows its command and folder, and can
+  copy its flags into the form.
+- **When its output goes to a file, the app follows it** from the current session's start: startup lines, request
+  feed and log, as for its own server.
+- **Stop asks first.** Restart is not offered, and quitting the app leaves the server running.
+- **The memory gauge reads an outside server's `/health` only while the window is shown,** since each read adds a
+  line to its log.
+- Tests: 202 unit tests and 10 UI tests. Against the real bench server, the app found it (pid, folder, log, remote
+  host, flags) and read every line of its log.
+
 ## Unreleased: remote connections (2026-10-01)
 
 - **A Remote connections switch** in the Server view's Endpoint section. On passes `--host 0.0.0.0`; it asks first,

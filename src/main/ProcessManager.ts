@@ -80,7 +80,8 @@ export function initialState(): ServerState {
     killAt: null,
     logFile: null,
     info: emptySessionInfo(),
-    lastExit: null
+    lastExit: null,
+    external: null
   }
 }
 

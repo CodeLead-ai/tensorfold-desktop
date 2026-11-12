@@ -44,7 +44,9 @@ export class MenuBar {
 
   constructor(
     private readonly desk: Desk,
-    private readonly show: (view?: string) => void
+    private readonly show: (view?: string) => void,
+    /** Asks before stopping a server the app did not start. */
+    private readonly confirmStopExternal: (state: ServerState) => Promise<boolean>
   ) {
     this.tray = new Tray(this.image('stopped'))
     desk.on('state', () => this.schedule())
@@ -68,7 +70,7 @@ export class MenuBar {
   }
 
   update(): void {
-    const state = this.desk.manager.state
+    const state = this.desk.state
     const key = stateOf(state)
     const serving = state.info.serving
     const model = serving?.model ?? state.info.loading?.model ?? null
@@ -76,16 +78,21 @@ export class MenuBar {
     this.tray.setImage(this.image(key))
     this.tray.setTitle(state.status === 'serving' && last !== null ? ` ${last.toFixed(1)} tok/s` : '', { fontType: 'monospacedDigit' })
     const label = { serving: 'Serving', loading: 'Loading', stopping: 'Stopping', stopped: 'Stopped', died: 'Died' }[key]
-    this.tray.setToolTip(`TensorFold Desk · ${label}${model ? ` · ${model}` : ''}`)
+    const outside = state.external && state.status !== 'stopped' ? ' (started outside the app)' : ''
+    this.tray.setToolTip(`TensorFold Desk · ${label}${model ? ` · ${model}` : ''}${outside}`)
     const running = state.status === 'loading' || state.status === 'serving'
+    const stop = async (): Promise<void> => {
+      if (state.external && !(await this.confirmStopExternal(state))) return
+      await this.desk.stop()
+    }
     const template: MenuItemConstructorOptions[] = [
-      { label: `${label}${model ? ` · ${model}` : ''}${serving ? ` · :${serving.port}` : ''}`, enabled: false },
+      { label: `${label}${model ? ` · ${model}` : ''}${serving ? ` · :${serving.port}` : ''}${outside}`, enabled: false },
       { label: last !== null ? `Last request: ${last.toFixed(1)} tok/s (${state.info.done} done)` : 'No requests yet', enabled: false },
       { type: 'separator' },
       state.status === 'stopped'
         ? { label: 'Start with the server form', click: () => void this.desk.start(this.desk.settings.lastConfig) }
-        : { label: 'Stop the server', enabled: running, click: () => void this.desk.stop() },
-      ...(running ? [{ label: 'Restart', click: () => void this.desk.restart(this.desk.settings.lastConfig) }] : []),
+        : { label: 'Stop the server', enabled: running, click: () => void stop() },
+      ...(running && !state.external ? [{ label: 'Restart', click: () => void this.desk.restart(this.desk.settings.lastConfig) }] : []),
       { type: 'separator' },
       { label: 'Show TensorFold Desk', click: () => this.show() },
       { label: 'Requests', click: () => this.show('requests') },
